@@ -369,6 +369,49 @@ canvas {
   font-size: 12px;
   margin-top: 4px;
 }
+
+/* 업적 목록 */
+.ach-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+.ach-cell {
+  padding: 10px 12px;
+  border: 1px solid #2b2f39;
+  border-radius: 10px;
+  background: rgba(12, 13, 19, 0.7);
+  text-align: left;
+  opacity: 0.6;
+}
+.ach-cell.done {
+  border-color: #6b5a2e;
+  background: rgba(28, 22, 10, 0.7);
+  box-shadow: 0 0 14px rgba(232, 198, 103, 0.14);
+  opacity: 1;
+}
+.ach-cell .ach-name {
+  font-size: 14.5px;
+  color: #8a8f9c;
+}
+.ach-cell.done .ach-name {
+  color: #ffe9a8;
+}
+.ach-cell .ach-name .ah {
+  font-size: 12px;
+  color: #e8c667;
+  margin-left: 4px;
+}
+.ach-cell .ach-desc {
+  font-size: 11.5px;
+  color: #5a6070;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+.ach-cell.done .ach-desc {
+  color: #b6bac6;
+}
 .records {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -514,7 +557,8 @@ canvas {
     transform: scale(0.8);
   }
   .hero-grid,
-  .codex-grid {
+  .codex-grid,
+  .ach-grid {
     grid-template-columns: repeat(2, 1fr);
   }
   .records {

@@ -3,7 +3,7 @@ import { WEAPON_DEFS } from '../data/weapons';
 import { PASSIVE_BY_ID } from '../data/passives';
 import { UPGRADE_DEFS, upgradeCost, LVBU_UNLOCK_COST } from '../data/upgrades';
 import { BOSS_DEFS } from '../game/boss';
-import { ACHIEVEMENT_BY_ID } from '../data/achievements';
+import { ACHIEVEMENT_BY_ID, ACHIEVEMENTS } from '../data/achievements';
 import { openSharePreview } from './shareCard';
 import type { SaveData } from '../core/save';
 import type { RunResult } from '../game/run';
@@ -426,6 +426,19 @@ export class Screens {
       grid.appendChild(cell);
     }
     wrap.appendChild(grid);
+
+    // 업적 목록
+    const earned = save.achievements ?? [];
+    wrap.appendChild(el('div', 'controls-hint', `업적 業績 (${earned.length}/${ACHIEVEMENTS.length})`));
+    const achGrid = el('div', 'ach-grid');
+    for (const a of ACHIEVEMENTS) {
+      const done = earned.includes(a.id);
+      const cell = el('div', done ? 'ach-cell done' : 'ach-cell');
+      cell.appendChild(el('div', 'ach-name', done ? `${a.name} <span class="ah">${a.hanja}</span>` : a.name));
+      cell.appendChild(el('div', 'ach-desc', done ? a.desc : '???'));
+      achGrid.appendChild(cell);
+    }
+    wrap.appendChild(achGrid);
     return wrap;
   }
 
