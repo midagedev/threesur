@@ -7,6 +7,9 @@ import {
   AdditiveBlending,
   DynamicDrawUsage,
 } from 'three';
+import type { ParticleSystem } from '../gfx/particles';
+import type { EffectsSystem } from '../gfx/effects';
+import { RetroProjectileBatch } from '../gfx/projectileSprites';
 
 const CAP = 256;
 
@@ -25,6 +28,7 @@ export class EnemyProjectilePool {
   private readonly cg = new Float32Array(CAP);
   private readonly cb = new Float32Array(CAP);
   private readonly size = new Float32Array(CAP);
+  private readonly trailT = new Float32Array(CAP);
   private readonly alive = new Uint8Array(CAP);
   private readonly free = new Int32Array(CAP);
   private freeTop = 0;
@@ -35,6 +39,7 @@ export class EnemyProjectilePool {
   private readonly kindArr: Float32Array;
   private readonly colAttr: InstancedBufferAttribute;
   private readonly kindAttr: InstancedBufferAttribute;
+  private readonly spriteBatches: RetroProjectileBatch[];
 
   constructor(scene: Scene) {
     for (let i = 0; i < CAP; i++) this.free[i] = CAP - 1 - i;
@@ -83,7 +88,7 @@ export class EnemyProjectilePool {
             b = smoothstep(1.0, 0.0, r) * pulse;
           }
           if (b <= 0.01) discard;
-          gl_FragColor = vec4(vColor * b * 2.0, b);
+          gl_FragColor = vec4(vColor * b * 0.75, b * 0.4);
         }
       `,
       transparent: true,
@@ -99,6 +104,10 @@ export class EnemyProjectilePool {
     this.mesh.renderOrder = 4;
     this.matArr = this.mesh.instanceMatrix.array as Float32Array;
     scene.add(this.mesh);
+    this.spriteBatches = [
+      new RetroProjectileBatch(scene, 'enemy-arrow', CAP),
+      new RetroProjectileBatch(scene, 'enemy-orb', CAP),
+    ];
   }
 
   get object(): InstancedMesh {
@@ -132,6 +141,7 @@ export class EnemyProjectilePool {
     this.radius[i] = 0.35;
     this.homing[i] = homing ? 1 : 0;
     this.kind[i] = kind;
+    this.trailT[i] = 0;
     if (kind === 1) {
       this.cr[i] = 1.6;
       this.cg[i] = 0.5;
@@ -146,7 +156,15 @@ export class EnemyProjectilePool {
     this.alive[i] = 1;
   }
 
-  update(dt: number, px: number, pz: number, playerR: number, hitPlayer: (dmg: number) => boolean): void {
+  update(
+    dt: number,
+    px: number,
+    pz: number,
+    playerR: number,
+    hitPlayer: (dmg: number) => boolean,
+    particles: ParticleSystem,
+    effects: EffectsSystem,
+  ): void {
     const r2base = playerR;
     for (let i = 0; i < CAP; i++) {
       if (this.alive[i] === 0) continue;
@@ -161,10 +179,24 @@ export class EnemyProjectilePool {
       }
       this.x[i] += this.vx[i] * dt;
       this.z[i] += this.vz[i] * dt;
+      this.trailT[i] -= dt;
+      if (this.trailT[i] <= 0) {
+        particles.projectileTrail(
+          this.x[i], this.z[i], this.vx[i], this.vz[i], this.cr[i], this.cg[i], this.cb[i],
+          this.kind[i] === 0 ? 0 : 3,
+        );
+        this.trailT[i] = this.kind[i] === 0 ? 0.09 : 0.055;
+      }
       const dx = px - this.x[i];
       const dz = pz - this.z[i];
       const rr = this.radius[i] + r2base;
       if (dx * dx + dz * dz <= rr * rr) {
+        particles.projectileImpact(
+          this.x[i], this.z[i], this.cr[i], this.cg[i], this.cb[i], this.kind[i] === 0 ? 0 : 3,
+        );
+        if (this.kind[i] === 1) {
+          effects.spawnRing(this.x[i], this.z[i], 1.25, this.cr[i], this.cg[i], this.cb[i], 0.24);
+        }
         hitPlayer(this.damage[i]);
         this.alive[i] = 0;
         this.free[this.freeTop++] = i;
@@ -180,6 +212,7 @@ export class EnemyProjectilePool {
 
   render(time: number): void {
     (this.mesh.material as ShaderMaterial).uniforms.uTime.value = time;
+    for (const batch of this.spriteBatches) batch.begin(time);
     let w = 0;
     for (let i = 0; i < CAP; i++) {
       if (this.alive[i] === 0) continue;
@@ -203,11 +236,16 @@ export class EnemyProjectilePool {
       this.colArr[c + 1] = this.cg[i];
       this.colArr[c + 2] = this.cb[i];
       this.kindArr[w] = this.kind[i];
+      const artScale = this.kind[i] === 0 ? this.size[i] * 1.75 : this.size[i] * 1.35;
+      this.spriteBatches[this.kind[i]].push(
+        this.x[i], 1.055, this.z[i], theta, artScale, artScale, 1,
+      );
       w++;
     }
     this.mesh.count = w;
     this.mesh.instanceMatrix.needsUpdate = true;
     this.colAttr.needsUpdate = true;
     this.kindAttr.needsUpdate = true;
+    for (const batch of this.spriteBatches) batch.end();
   }
 }

@@ -17,7 +17,6 @@ export interface HeroDef {
   startWeapon: string;
   bonusText: string; // 고유 보너스 설명(UI)
   musou: string; // 무쌍난무 종류 키
-  locked?: boolean; // 해금 필요 (여포)
 }
 
 export const HEROES: Record<string, HeroDef> = {
@@ -128,6 +127,5 @@ export const HEROES: Record<string, HeroDef> = {
     startWeapon: 'halberd',
     bonusText: '공격력 +25%, 받는 피해 +25%',
     musou: 'lvbu',
-    locked: true,
   },
 };

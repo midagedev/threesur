@@ -13,7 +13,14 @@ import { EnemyPool, ENEMY_CAP, SHEET_SGRADE, SHEET_APRIORITY } from './enemies';
 import { Spawner } from './spawner';
 import { SpatialHash } from './collision';
 import { GemPool } from './pickups';
-import { ProjectilePool } from './projectiles';
+import {
+  PK_ARROW,
+  PK_CAVALRY,
+  PK_ORB,
+  PK_SLASHWAVE,
+  PK_TALISMAN,
+  ProjectilePool,
+} from './projectiles';
 import { ZonePool } from './zones';
 import { EnemyProjectilePool } from './enemyProjectiles';
 import { TreasurePool } from './treasure';
@@ -577,7 +584,7 @@ export class Run {
     for (let i = 0; i < this.weapons.length; i++) this.weapons[i].update(this.ctx);
     this.projectiles.update(
       gdt, this.player.x, this.player.z, this.enemies, this.hash,
-      this.damageText, this.ctx.onKill, this.particles, this.scratch,
+      this.damageText, this.ctx.onKill, this.particles, this.effects, this.scratch,
     );
     this.zones.update(gdt, this.enemies, this.hash, this.damageText, this.ctx.onKill, this.particles, this.scratch);
 
@@ -591,7 +598,10 @@ export class Run {
     this.ctx.dt = gdt;
 
     // 적 투사체 (적 dt)
-    this.enemyProj.update(edt, this.player.x, this.player.z, this.player.radius, this.onPlayerHit);
+    this.enemyProj.update(
+      edt, this.player.x, this.player.z, this.player.radius, this.onPlayerHit,
+      this.particles, this.effects,
+    );
 
     // 접촉 대미지
     this.contactDamage();
@@ -1149,6 +1159,25 @@ export class Run {
   }
   testAddGold(n: number): void {
     this.gold += n;
+  }
+  testSpawnProjectileShowcase(): void {
+    const x = this.player.x - 4;
+    const z = this.player.z;
+    const shots: Array<[number, number, number, number, number, number, number, number]> = [
+      [PK_ARROW, -3.2, 2.0, 1.5, 0.55, 2.0, 1.5, 0.7],
+      [PK_TALISMAN, -1.6, 1.6, 1.25, 0.95, 1.7, 1.7, 2.1],
+      [PK_SLASHWAVE, 0, 1.3, 3.0, 2.2, 0.7, 2.4, 1.2],
+      [PK_ORB, 1.8, 1.0, 1.35, 1.35, 1.6, 1.8, 2.3],
+      [PK_CAVALRY, 3.8, 2.4, 4.5, 1.7, 2.0, 1.4, 0.9],
+    ];
+    for (const [kind, oz, speed, length, width, r, g, b] of shots) {
+      this.projectiles.spawn(
+        x, z + oz, 1, 0, speed, 0, 0.2, 99, 4.5, kind,
+        r, g, b, length, width, false, 0, kind === PK_CAVALRY,
+      );
+    }
+    this.enemyProj.spawn(x, z + 5.3, 1, 0, 1.8, 0, false, 0);
+    this.enemyProj.spawn(x, z - 5.0, 1, 0, 1.3, 0, true, 1);
   }
   testSpawnBoss(type: string): void {
     if (!this.boss.active) this.boss.spawn(type, this.gameTime / 60, this.ctx, this.player.x, this.player.z);

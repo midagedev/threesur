@@ -216,8 +216,11 @@ canvas {
   transform: translateY(-3px);
 }
 .hero-card.locked {
-  cursor: pointer;
+  cursor: not-allowed;
   border-color: #33373f;
+}
+.hero-card.locked.shop-lock {
+  cursor: pointer;
 }
 .hero-portrait {
   image-rendering: pixelated;
@@ -230,9 +233,9 @@ canvas {
 }
 .hero-lock {
   position: absolute;
-  top: 50%;
+  top: 48px;
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -242,7 +245,10 @@ canvas {
   text-shadow: 0 0 12px rgba(0, 0, 0, 0.9);
 }
 .hero-lock .price {
-  font-size: 15px;
+  max-width: 150px;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
   letter-spacing: 1px;
 }
 .hero-name {

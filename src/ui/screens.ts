@@ -5,6 +5,7 @@ import { UPGRADE_DEFS, upgradeCost, LVBU_UNLOCK_COST } from '../data/upgrades';
 import { BOSS_DEFS } from '../game/boss';
 import { ACHIEVEMENT_BY_ID, ACHIEVEMENTS } from '../data/achievements';
 import { DIALOGUE, anyRandomLine } from '../data/dialogue';
+import { heroUnlockText, isHeroUnlocked } from '../data/heroUnlocks';
 import { openSharePreview } from './shareCard';
 import type { SaveData } from '../core/save';
 import type { RunResult } from '../game/run';
@@ -14,6 +15,7 @@ import type { Atlas } from '../gfx/atlas';
 export interface ShareInfo {
   title: { name: string; hanja: string }; // 공유 카드 대표 칭호
   newAchievements: string[]; // 이번 런에 새로 달성한 업적 id
+  newHeroes: string[]; // 이번 런 결과로 새로 열린 장수 id
 }
 
 // 장수 선택 순서.
@@ -186,14 +188,15 @@ export class Screens {
       for (const id of HERO_ORDER) {
         const h = HEROES[id];
         if (!h) continue;
-        const locked = h.locked === true && !save.lvbuUnlocked;
+        const locked = !isHeroUnlocked(id, save);
         const card = el('div', locked ? 'hero-card locked' : 'hero-card');
+        if (locked && id === 'lvbu') card.classList.add('shop-lock');
         const port = heroPortrait(h.charIndex, 2.4);
         card.appendChild(port);
         if (locked) {
           const lock = el('div', 'hero-lock');
           lock.appendChild(el('div', '', '🔒'));
-          lock.appendChild(el('div', 'price', `${LVBU_UNLOCK_COST}⟡`));
+          lock.appendChild(el('div', 'price', heroUnlockText(id, save)));
           card.appendChild(lock);
         }
         const wname = WEAPON_DEFS[h.startWeapon]?.name ?? h.startWeapon;
@@ -204,8 +207,7 @@ export class Screens {
         const quote = DIALOGUE[id]?.select;
         if (quote && !locked) card.appendChild(el('div', 'hero-quote', `“${quote}”`));
         if (locked) {
-          card.appendChild(el('div', 'hero-line', '본진에서 해금'));
-          card.addEventListener('click', () => this.cb.onOpenShop('upgrade'));
+          if (id === 'lvbu') card.addEventListener('click', () => this.cb.onOpenShop('upgrade'));
         } else {
           card.addEventListener('click', () => this.cb.onSelectHero(id));
         }
@@ -254,6 +256,14 @@ export class Screens {
           .join(' · ');
         const toast = el('div', 'ach-toast', `업적 달성! <b>${names}</b>`);
         s.appendChild(toast);
+      }
+      if (share.newHeroes.length > 0) {
+        const names = share.newHeroes
+          .map((id) => HEROES[id])
+          .filter((h) => !!h)
+          .map((h) => `${h.name} ${h.hanja}`)
+          .join(' · ');
+        s.appendChild(el('div', 'ach-toast hero-unlock-toast', `새 장수 해금! <b>${names}</b>`));
       }
 
       const stats = el('div', 'result-stats');

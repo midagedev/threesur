@@ -13,6 +13,7 @@ import { loadSave, writeSave, updateBest } from './core/save';
 import type { SaveData } from './core/save';
 import { computeMeta, UPGRADE_BY_ID, upgradeCost, LVBU_UNLOCK_COST } from './data/upgrades';
 import { evaluateAchievements, bestTitle } from './data/achievements';
+import { isHeroUnlocked, unlockedHeroIds } from './data/heroUnlocks';
 
 type Scene = 'title' | 'select' | 'run' | 'result' | 'shop' | 'pause';
 
@@ -89,7 +90,8 @@ loadAtlas()
       audio.playBgm('title');
       screens.showShop(save, tab);
     }
-    function startRun(heroId: string): void {
+    function startRun(heroId: string, bypassUnlock = false): void {
+      if (!bypassUnlock && !isHeroUnlocked(heroId, save)) return;
       lastHero = heroId;
       scene = 'run';
       screens.hide();
@@ -100,6 +102,7 @@ loadAtlas()
       scene = 'result';
       lastResult = result;
       joystick.setVisible(false);
+      const unlockedBefore = new Set(unlockedHeroIds(save));
       // 골드 적립 + 최고기록 + 보스 도감 + 누적 통계 저장
       save.gold += result.goldEarned;
       const records = updateBest(save.best, {
@@ -126,10 +129,11 @@ loadAtlas()
       });
       const newAchievements = earned.filter((id) => !save.achievements.includes(id));
       for (const id of newAchievements) save.achievements.push(id);
+      const newHeroes = unlockedHeroIds(save).filter((id) => !unlockedBefore.has(id));
       writeSave(save);
       audio.playJingle(result.victory ? 'victory' : 'defeat');
       if (newAchievements.length > 0) audio.sfx('achievement');
-      screens.showResult(result, save, records, { title: bestTitle(earned), newAchievements });
+      screens.showResult(result, save, records, { title: bestTitle(earned), newAchievements, newHeroes });
     }
     function onPause(): void {
       scene = 'pause';
@@ -213,7 +217,7 @@ loadAtlas()
       (window as unknown as { __GAME_TEST__: unknown }).__GAME_TEST__ = {
       // 씬 제어
       goToTitle: () => goTitle(),
-      selectHero: (id: string) => startRun(id),
+      selectHero: (id: string) => startRun(id, true),
       openShop: (tab: 'upgrade' | 'codex' = 'upgrade') => goShop(tab),
       grantGold: (n: number) => {
         save.gold += n;
@@ -246,6 +250,7 @@ loadAtlas()
       fillMusou: () => run.testFillMusou(),
       activateMusou: () => run.testActivateMusou(),
       addGold: (n: number) => run.testAddGold(n),
+      showProjectiles: () => run.testSpawnProjectileShowcase(),
       spawnBoss: (t: string) => run.testSpawnBoss(t),
       setBossFlags: (b3: boolean, b6: boolean, b9: boolean) => run.testSetBossFlags(b3, b6, b9),
       treasure: (boss?: boolean) => run.testTreasure(boss),

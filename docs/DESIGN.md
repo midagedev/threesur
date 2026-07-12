@@ -30,6 +30,10 @@
 
 ## 3. 플레이어블 장수 (sgrade 시트)
 
+초기 선택은 조운·관우만 제공한다. 장비는 누적 100처치, 황충은 최고 생존 3분,
+제갈량은 6분 보스 동탁 토벌로 해금된다. 여포는 기존처럼 본진에서 5000골드로 해금한다.
+강한 장수일수록 실제 플레이 성과 뒤에 열어 첫 세션의 선택 과부하를 줄인다.
+
 | id | 이름 | 시작 무기 | 고유 보너스 | 무쌍난무 |
 |---|---|---|---|---|
 | zhaoyun | 조운 | 용담창 | 이동속도 +10% | **창격돌진**: 8방향 연속 무적 돌진, 궤적 폭발 |
@@ -103,7 +107,8 @@
 - **스프라이트**: NearestFilter, 세워진 빌보드 쿼드(살짝 기울임), 발밑 타원 블롭 그림자, 걷기 4프레임 8fps
 - **적 렌더**: 시트별 InstancedMesh + 커스텀 셰이더 (인스턴스 속성: uv 프레임, 피격 플래시, 스케일, 틴트) — 600+ 마리 60fps
 - **타격감**: 피격 화이트 플래시, 넉백, 엘리트/보스 히트스탑 40ms, 사망 파티클 버스트 + 디졸브
-- **무기 이펙트**: 애디티브 슬래시 아크(리본 트레일), 지그재그 라이트닝+글로우, GPU 화염 파티클, 확장 충격파 링, 유도 부적 트레일
+- **투사체 아트**: 생성 원화를 64×64 논리 격자·40색 이하 팔레트로 다시 찍은 레트로 스프라이트 7종(연노 화살/부적/참격파/팔괘 오브/기마/적 화살/적 마탄). NearestFilter로 기존 장수 도트와 결을 맞춘다.
+- **무기 이펙트**: 불투명 도트 스프라이트를 본체로 두고, 애디티브 후광은 낮은 강도로 뒤에 배치한다. 종류별 잔광 파티클·명중 파편·참격/팔괘/기마 충격파 링을 짧게 겹쳐 모양과 타격 위치를 가리지 않으면서 화려함을 더한다.
 - **무쌍 연출**: 시간 슬로우, 비네트+채도 시프트, 방사형 스피드라인, 대형 한자 "無雙" 플래시, 종료 대형 충격파
 - **데미지 숫자**: 캔버스 스프라이트 풀, 크리티컬은 크고 노랗게
 - **UI 톤**: 먹빛 배경 + 금색 헤어라인, 한자 병기 (예: "무쌍 無雙"), 세리프 명조 계열
@@ -124,7 +129,8 @@ src/
           weapons/*.ts pickups.ts levelup.ts musou.ts boss.ts combo.ts stats.ts
   data/   heroes.ts weapons.ts passives.ts waves.ts upgrades.ts spriteManifest.ts
   ui/     hud.ts screens.ts(title/select/result/shop) cards.ts joystick.ts
-public/assets/sprites/  # sgrade/apriority/soldiers/variants 시트 + manifest.json
+public/assets/sprites/      # sgrade/apriority/soldiers/variants 시트 + manifest.json
+public/assets/projectiles/  # 생성 원화를 레트로 팔레트로 가공한 투사체 PNG 7종
 ```
 
 - 적/젬/파티클: 고정 크기 풀 + freelist, 프레임당 할당 0 목표

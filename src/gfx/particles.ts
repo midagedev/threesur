@@ -199,6 +199,75 @@ export class ParticleSystem {
     );
   }
 
+  // 생성 스프라이트 뒤에 붙는 짧은 잔광. 본체를 가리지 않도록 작고 성기게 방출한다.
+  projectileTrail(
+    x: number,
+    z: number,
+    vx: number,
+    vz: number,
+    r: number,
+    g: number,
+    b: number,
+    kind: number,
+  ): void {
+    const speed = Math.hypot(vx, vz) || 1;
+    const nx = vx / speed;
+    const nz = vz / speed;
+    const count = kind === 4 ? 2 : 1;
+    const size = kind === 2 || kind === 4 ? 0.75 : kind === 3 ? 0.58 : 0.38;
+    for (let k = 0; k < count; k++) {
+      const side = (Math.random() - 0.5) * (kind === 4 ? 1.2 : 0.35);
+      const back = Math.random() * (kind === 4 ? 1.4 : 0.45);
+      this.emit(
+        x - nx * back - nz * side,
+        0.75 + Math.random() * 0.35,
+        z - nz * back + nx * side,
+        -nx * (0.8 + Math.random() * 1.6) - nz * side,
+        0.25 + Math.random() * 0.6,
+        -nz * (0.8 + Math.random() * 1.6) + nx * side,
+        r * 0.7,
+        g * 0.7,
+        b * 0.7,
+        size * (0.7 + Math.random() * 0.6),
+        0.16 + Math.random() * 0.14,
+        1.0,
+        0.88,
+      );
+    }
+  }
+
+  // 명중 순간에는 도트 파편이 바깥으로 터져 투사체 종류와 충돌 위치를 동시에 읽힌다.
+  projectileImpact(
+    x: number,
+    z: number,
+    r: number,
+    g: number,
+    b: number,
+    kind: number,
+  ): void {
+    const count = kind === 2 || kind === 4 ? 9 : kind === 3 ? 6 : 4;
+    const force = kind === 4 ? 5.2 : kind === 2 ? 4.0 : 2.8;
+    for (let k = 0; k < count; k++) {
+      const angle = (k / count) * Math.PI * 2 + Math.random() * 0.45;
+      const speed = force * (0.45 + Math.random() * 0.7);
+      this.emit(
+        x,
+        0.75 + Math.random() * 0.45,
+        z,
+        Math.cos(angle) * speed,
+        0.9 + Math.random() * 1.8,
+        Math.sin(angle) * speed,
+        r,
+        g,
+        b,
+        (kind === 2 || kind === 4 ? 0.72 : 0.48) * (0.75 + Math.random() * 0.5),
+        0.18 + Math.random() * 0.18,
+        4.2,
+        0.9,
+      );
+    }
+  }
+
   update(dt: number): void {
     const pos = this.pos;
     const vel = this.vel;

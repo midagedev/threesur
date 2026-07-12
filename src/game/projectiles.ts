@@ -11,6 +11,8 @@ import type { EnemyPool } from './enemies';
 import type { SpatialHash } from './collision';
 import type { DamageText } from '../gfx/damageText';
 import type { ParticleSystem } from '../gfx/particles';
+import type { EffectsSystem } from '../gfx/effects';
+import { RetroProjectileBatch } from '../gfx/projectileSprites';
 
 const CAP = 384;
 const HITMAX = 8; // 관통 시 중복 타격 방지용 최근 타격 목록 크기
@@ -49,6 +51,7 @@ export class ProjectilePool {
   private readonly oVel = new Float32Array(CAP);
   private readonly atkT = new Float32Array(CAP);
   private readonly dusty = new Uint8Array(CAP);
+  private readonly trailT = new Float32Array(CAP);
   private readonly alive = new Uint8Array(CAP);
   private readonly hits = new Int32Array(CAP * HITMAX);
   private readonly hitN = new Uint8Array(CAP);
@@ -63,6 +66,7 @@ export class ProjectilePool {
   private readonly colAttr: InstancedBufferAttribute;
   private readonly kindAttr: InstancedBufferAttribute;
   private readonly fadeAttr: InstancedBufferAttribute;
+  private readonly spriteBatches: RetroProjectileBatch[];
 
   constructor(scene: Scene) {
     for (let i = 0; i < CAP; i++) this.free[i] = CAP - 1 - i;
@@ -140,7 +144,8 @@ export class ProjectilePool {
             b = body * streak * 1.3;
           }
           if (b <= 0.001) discard;
-          gl_FragColor = vec4(vColor * b * 1.5, b * vFade);
+          // 생성 스프라이트가 본체를 담당한다. 이 셰이더는 뒤쪽 후광/속도선만 맡는다.
+          gl_FragColor = vec4(vColor * b * 0.72, b * vFade * 0.38);
         }
       `,
       transparent: true,
@@ -156,6 +161,14 @@ export class ProjectilePool {
     this.mesh.renderOrder = 4;
     this.matArr = this.mesh.instanceMatrix.array as Float32Array;
     scene.add(this.mesh);
+
+    this.spriteBatches = [
+      new RetroProjectileBatch(scene, 'player-arrow', CAP),
+      new RetroProjectileBatch(scene, 'talisman', CAP),
+      new RetroProjectileBatch(scene, 'slash-wave', CAP),
+      new RetroProjectileBatch(scene, 'bagua-orb', CAP),
+      new RetroProjectileBatch(scene, 'cavalry', CAP),
+    ];
   }
 
   get object(): InstancedMesh {
@@ -216,6 +229,7 @@ export class ProjectilePool {
     this.hy[i] = kind === PK_SLASHWAVE ? 0.7 : kind === PK_ORB ? 0.9 : 1.0;
     this.mode[i] = 0;
     this.dusty[i] = dusty ? 1 : 0;
+    this.trailT[i] = 0;
     this.hitN[i] = 0;
     this.alive[i] = 1;
   }
@@ -241,6 +255,7 @@ export class ProjectilePool {
     this.life[i] = 1;
     this.invDur[i] = 0;
     this.dusty[i] = 0;
+    this.trailT[i] = 0;
     this.alive[i] = 1;
   }
 
@@ -278,6 +293,8 @@ export class ProjectilePool {
     onKill: (idx: number) => void,
     scratch: number[],
     orbitPulse: boolean,
+    particles: ParticleSystem,
+    effects: EffectsSystem,
   ): void {
     const px = this.x[i];
     const pz = this.z[i];
@@ -310,6 +327,16 @@ export class ProjectilePool {
       const dmg = this.damage[i];
       const died = enemies.damageAt(j, dmg);
       damageText.spawn(dmg, enemies.x[j], enemies.scale[j] * 0.7, enemies.z[j], false);
+      particles.projectileImpact(
+        enemies.x[j], enemies.z[j], this.cr[i], this.cg[i], this.cb[i], this.kind[i],
+      );
+      if (this.kind[i] === PK_SLASHWAVE) {
+        effects.spawnRing(enemies.x[j], enemies.z[j], 1.5, this.cr[i], this.cg[i], this.cb[i], 0.2);
+      } else if (this.kind[i] === PK_ORB && orbitPulse) {
+        effects.spawnRing(enemies.x[j], enemies.z[j], 0.75, this.cr[i], this.cg[i], this.cb[i], 0.18);
+      } else if (this.kind[i] === PK_CAVALRY) {
+        effects.spawnRing(enemies.x[j], enemies.z[j], 1.9, 1.5, 0.75, 0.35, 0.24);
+      }
       if (died) onKill(j);
       if (!isOrbit) {
         this.pierce[i]--;
@@ -335,6 +362,7 @@ export class ProjectilePool {
     damageText: DamageText,
     onKill: (idx: number) => void,
     particles: ParticleSystem,
+    effects: EffectsSystem,
     scratch: number[],
   ): void {
     for (let i = 0; i < CAP; i++) {
@@ -347,7 +375,14 @@ export class ProjectilePool {
         this.atkT[i] -= dt;
         const pulse = this.atkT[i] <= 0;
         if (pulse) this.atkT[i] = 0.3;
-        this.tryHit(i, enemies, hash, damageText, onKill, scratch, pulse);
+        this.trailT[i] -= dt;
+        if (this.trailT[i] <= 0) {
+          particles.projectileTrail(
+            this.x[i], this.z[i], 0, 0, this.cr[i], this.cg[i], this.cb[i], this.kind[i],
+          );
+          this.trailT[i] = 0.09;
+        }
+        this.tryHit(i, enemies, hash, damageText, onKill, scratch, pulse, particles, effects);
         continue;
       }
       // 유도
@@ -366,7 +401,14 @@ export class ProjectilePool {
       this.x[i] += this.vx[i] * dt;
       this.z[i] += this.vz[i] * dt;
       if (this.dusty[i]) particles.dust(this.x[i], this.z[i]);
-      this.tryHit(i, enemies, hash, damageText, onKill, scratch, false);
+      this.trailT[i] -= dt;
+      if (this.trailT[i] <= 0) {
+        particles.projectileTrail(
+          this.x[i], this.z[i], this.vx[i], this.vz[i], this.cr[i], this.cg[i], this.cb[i], this.kind[i],
+        );
+        this.trailT[i] = this.kind[i] === PK_CAVALRY ? 0.035 : this.kind[i] === PK_ARROW ? 0.08 : 0.055;
+      }
+      this.tryHit(i, enemies, hash, damageText, onKill, scratch, false, particles, effects);
       if (this.alive[i] === 0) continue;
       this.life[i] -= dt;
       if (this.life[i] <= 0) this.kill(i);
@@ -375,6 +417,7 @@ export class ProjectilePool {
 
   render(time: number): void {
     (this.mesh.material as ShaderMaterial).uniforms.uTime.value = time;
+    for (const batch of this.spriteBatches) batch.begin(time);
     let w = 0;
     for (let i = 0; i < CAP; i++) {
       if (this.alive[i] === 0) continue;
@@ -421,6 +464,14 @@ export class ProjectilePool {
         fade = Math.min(1, lt * 4) * Math.min(1, (1 - lt) * 6 + 0.3);
       }
       this.fadeArr[w] = fade;
+      const artScale = this.kind[i] === PK_CAVALRY
+        ? this.len[i]
+        : this.kind[i] === PK_SLASHWAVE
+          ? Math.max(this.len[i], this.wid[i])
+          : this.len[i] * 1.18;
+      this.spriteBatches[this.kind[i]].push(
+        this.x[i], this.hy[i] + 0.055, this.z[i], theta, artScale, artScale, fade,
+      );
       w++;
     }
     this.mesh.count = w;
@@ -428,6 +479,7 @@ export class ProjectilePool {
     this.colAttr.needsUpdate = true;
     this.kindAttr.needsUpdate = true;
     this.fadeAttr.needsUpdate = true;
+    for (const batch of this.spriteBatches) batch.end();
   }
 }
 
