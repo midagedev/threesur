@@ -266,6 +266,7 @@ export class Hud {
     if (!v) {
       this.comboEl.style.display = 'none';
       this.bossWrap.style.display = 'none';
+      this.bannerLayer.querySelectorAll('.battle-quote').forEach((el) => el.remove());
       this.setFever(false);
     }
   }
@@ -420,6 +421,52 @@ export class Hud {
         { transform: 'scale(1.1)', opacity: 1, offset: 0.2 },
         { transform: 'scale(1)', opacity: 1, offset: 0.75 },
         { transform: 'scale(1.05)', opacity: 0 },
+      ],
+      { duration: durationMs, easing: 'ease-out' },
+    );
+    anim.onfinish = () => el.remove();
+  }
+
+  // 전투 중 짧은 원군 대사. 중앙 경고 배너와 겹치지 않게 화면 아래쪽에 둔다.
+  quote(name: string, line: string, durationMs = 3600): void {
+    if (!line) return;
+    this.bannerLayer.querySelectorAll('.battle-quote').forEach((el) => el.remove());
+    const el = document.createElement('div');
+    el.className = 'battle-quote';
+    el.style.cssText = [
+      'position:absolute',
+      'bottom:max(16%,110px)',
+      'left:50%',
+      'transform:translateX(-50%)',
+      'width:min(760px,86vw)',
+      'padding:12px 18px',
+      'border:1px solid rgba(126,200,255,0.45)',
+      'border-radius:10px',
+      'background:linear-gradient(90deg,rgba(8,14,24,0.9),rgba(15,25,38,0.82))',
+      'box-shadow:0 0 24px rgba(80,160,240,0.2)',
+      'display:flex',
+      'gap:12px',
+      'align-items:center',
+      'color:#e9f4ff',
+      'font-size:min(16px,3.7vw)',
+      'letter-spacing:0.4px',
+      'white-space:normal',
+    ].join(';');
+    const who = document.createElement('b');
+    who.textContent = name;
+    who.style.cssText = 'color:#7ec8ff;white-space:nowrap;letter-spacing:2px;';
+    const lineEl = document.createElement('span');
+    lineEl.textContent = `“${line}”`;
+    lineEl.style.cssText = 'line-height:1.45;';
+    el.appendChild(who);
+    el.appendChild(lineEl);
+    this.bannerLayer.appendChild(el);
+    const anim = el.animate(
+      [
+        { transform: 'translateX(-50%) translateY(12px)', opacity: 0 },
+        { transform: 'translateX(-50%) translateY(0)', opacity: 1, offset: 0.15 },
+        { transform: 'translateX(-50%) translateY(0)', opacity: 1, offset: 0.82 },
+        { transform: 'translateX(-50%) translateY(-6px)', opacity: 0 },
       ],
       { duration: durationMs, easing: 'ease-out' },
     );

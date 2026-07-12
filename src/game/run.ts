@@ -37,6 +37,8 @@ import { PASSIVE_DEFS, PASSIVE_BY_ID } from '../data/passives';
 import type { MetaMods } from '../data/upgrades';
 import { rng } from '../core/rng';
 import { audio } from '../core/audio';
+import { Companion } from './companion';
+import { pickLine } from '../data/dialogue';
 
 type State = 'attract' | 'play' | 'levelup' | 'paused' | 'dead' | 'victory' | 'victoryChoice';
 
@@ -98,6 +100,7 @@ export class Run {
   private readonly labels: Labels;
 
   private readonly player: Player;
+  private readonly companion: Companion;
   private readonly enemies = new EnemyPool();
   private readonly spawner: Spawner;
   private readonly hash = new SpatialHash();
@@ -145,6 +148,8 @@ export class Run {
   private victoryChoiceShown = false; // 승리 선택 오버레이 1회 표시
   private victoryAchieved = false; // 10분 도달(이후 사망해도 승리 처리)
   private forceRelicNext = false; // 테스트: 다음 레벨업 카드에 유물 강제
+  private heroQuoteCursor = 0;
+  private nextHeroQuoteAt = 12;
   private readonly victoryOverlay: HTMLDivElement;
 
   // 히트스탑: 시뮬 dt만 스케일, 연출/카메라는 실제 dt 유지 (game-feel)
@@ -172,7 +177,7 @@ export class Run {
     this.variantsR = new InstancedSpriteRenderer(atlas.variants, ENEMY_CAP);
     this.sgradeR = new InstancedSpriteRenderer(atlas.sgrade, 48);
     this.apriorityR = new InstancedSpriteRenderer(atlas.apriority, 48);
-    this.shadowR = new ShadowRenderer(ENEMY_CAP + 1);
+    this.shadowR = new ShadowRenderer(ENEMY_CAP + 2);
     this.scene.add(
       this.soldiersR.mesh,
       this.variantsR.mesh,
@@ -194,6 +199,7 @@ export class Run {
     this.player = new Player(atlas, this.hero);
     this.player.setRimScale(touch ? 0.5 : 1); // 모바일 저해상도 블룸에서 림 과다 방지
     this.scene.add(this.player.mesh);
+    this.companion = new Companion(this.scene, atlas);
     this.spawner = new Spawner(atlas, this.enemies);
     this.weapons = [createWeapon(this.hero.startWeapon)];
 
@@ -203,10 +209,12 @@ export class Run {
     );
     this.musou = new Musou(this.hero.musou, () => {
       this.hud.banner('無雙', '#ffe9a8', 120, 1200);
+      this.sayHero(2600);
       audio.sfx('musou');
     });
     this.boss = new Boss(atlas, (name, hanja) => {
       this.hud.banner(`${name} 등장 ${hanja}`, '#e85c4a', 44, 1800);
+      this.sayHero();
       audio.sfx('bossHorn');
       audio.playBgm('boss');
     });
@@ -382,6 +390,7 @@ export class Run {
     this.musou.reset();
     this.events.reset();
     this.objects.reset();
+    this.companion.reset(this.hero.id);
     this.boss.active = false;
     this.boss.idx = -1;
   }
@@ -410,6 +419,8 @@ export class Run {
     this.victoryAchieved = false;
     this.forceRelicNext = false;
     this.feverWasOn = false;
+    this.heroQuoteCursor = 0;
+    this.nextHeroQuoteAt = 12;
     this.victoryOverlay.style.display = 'none';
     this.hud.setFever(false);
     // 메타: 부활 + 시작 레벨
@@ -517,6 +528,12 @@ export class Run {
     this.player.musouInvuln = this.musou.active;
     this.player.update(gdt, this.input);
 
+    // 선택 장수의 군웅전 NPC 카드 대사를 런 전반에 드문드문 노출한다.
+    if (this.gameTime >= this.nextHeroQuoteAt) {
+      this.sayHero();
+      this.nextHeroQuoteAt += 105;
+    }
+
     // 보스 스케줄
     this.checkBossSpawn();
 
@@ -546,6 +563,15 @@ export class Run {
     // 이동 후 해시 재구성 (무기/접촉 판정)
     this.hash.clear();
     this.enemies.insertAll(this.hash);
+
+    // 45초에 한 명만 합류하는 간단한 원군. 기존 선택/경제/저장 흐름은 바꾸지 않는다.
+    if (this.companion.update(gdt, this.gameTime, this.player, this.ctx)) {
+      const ally = this.companion.definition;
+      this.effects.spawnRing(this.companion.x, this.companion.z, 7, 0.7, 1.5, 2.4, 0.6);
+      this.hud.banner(`원군 ${ally.name} ${ally.hanja}`, '#7ec8ff', 46, 1600);
+      this.hud.quote(ally.name, pickLine(ally.id, 0));
+      audio.sfx('buff');
+    }
 
     // 무기
     for (let i = 0; i < this.weapons.length; i++) this.weapons[i].update(this.ctx);
@@ -633,6 +659,11 @@ export class Run {
     };
   }
 
+  private sayHero(durationMs = 3600): void {
+    const line = pickLine(this.hero.id, this.heroQuoteCursor++);
+    this.hud.quote(this.hero.name, line, durationMs);
+  }
+
   private checkBossSpawn(): void {
     if (this.boss.active) return;
     if (!this.bossFlags.b3 && this.gameTime >= 180) {
@@ -650,6 +681,7 @@ export class Run {
   private renderSprites(): void {
     this.shadowR.begin();
     if (this.state !== 'attract') this.shadowR.push(this.player.x, this.player.z, this.player.radius * 1.6);
+    if (this.companion.active) this.shadowR.push(this.companion.x, this.companion.z, this.companion.radius * 1.5);
     this.enemies.render(
       this.atlas, this.soldiersR, this.variantsR, this.sgradeR, this.apriorityR, this.shadowR,
     );
@@ -1160,6 +1192,8 @@ export class Run {
       passives: { ...this.passives },
       musou: this.musou.gauge,
       bossActive: this.boss.active,
+      companion: this.companion.active ? this.companion.definition.id : null,
+      companionAttacks: this.companion.attacks,
       relics: [...this.relicIds],
       endless: this.endless,
       fever: this.combo.fever,

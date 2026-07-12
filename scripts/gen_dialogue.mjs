@@ -4,7 +4,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 const SRC = '/Users/hckim/repo/three-kingdoms-mud/internal/npc/packs/gunungjeon/cards';
 // threesur id → 카드 파일명 (동일)
-const IDS = ['zhaoyun', 'guanyu', 'zhangfei', 'zhugeliang', 'huangzhong', 'lvbu', 'yuanshao', 'dongzhuo'];
+const IDS = [
+  'zhaoyun', 'guanyu', 'zhangfei', 'zhugeliang', 'huangzhong', 'lvbu',
+  'yuanshao', 'dongzhuo',
+  // 전투 원군(군웅전 임시동료 개념을 축약해 사용)
+  'liubei', 'caocao', 'zhouyu', 'zhangliao',
+];
 
 const out = {};
 for (const id of IDS) {
