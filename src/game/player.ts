@@ -5,7 +5,10 @@ import type { Input } from '../core/input';
 import type { HeroDef } from '../data/heroes';
 import { CELL_W } from '../data/spriteManifest';
 import { PASSIVE_BY_ID } from '../data/passives';
+import { RELIC_BY_ID } from '../data/relics';
 import type { MetaMods } from '../data/upgrades';
+
+export type BuffKind = 'attack' | 'speed' | 'musou';
 
 // 무기/이동/피해 계산에 쓰이는 전체 스탯. 패시브 적용으로 갱신.
 export interface PlayerStats {
@@ -37,6 +40,11 @@ export class Player {
   readonly stats: PlayerStats;
   hero: HeroDef;
   private meta: MetaMods | null = null; // 메타 상점 영구 강화 (런 시작 시 세팅)
+  private relicIds: string[] = []; // 보유 저주 유물
+  private curPassives: Record<string, number> = {}; // 마지막 재계산에 쓴 패시브(버프 만료 재계산용)
+  private buffAttackT = 0; // 사당 공격 버프 잔여(초)
+  private buffSpeedT = 0; // 사당 이속 버프 잔여
+  private buffMusouT = 0; // 사당 무쌍충전 버프 잔여
 
   // 바라보는 방향(단위 벡터). 무기 발사 방향으로 사용.
   faceX = 0;
@@ -93,6 +101,11 @@ export class Player {
     return PLAYER_RADIUS;
   }
 
+  // 플레이어 림 글로우 강도(모바일 저해상도 블룸 대응).
+  setRimScale(s: number): void {
+    this.quad.setRimScale(s);
+  }
+
   // 장수 교체(선택 화면). 파생 스탯 갱신. 스프라이트 시트는 sgrade 공용.
   setHero(hero: HeroDef): void {
     this.hero = hero;
@@ -108,6 +121,7 @@ export class Player {
 
   // 스탯을 장수 base로 리셋한 뒤 보유 패시브를 전부 재적용. 누적 드리프트 없음.
   resetStats(passives: Record<string, number>): void {
+    this.curPassives = passives;
     const s = this.stats;
     const h = this.hero;
     s.damageMul = h.damageMul;
@@ -135,6 +149,35 @@ export class Player {
       s.pickupMul *= this.meta.pickupMul;
       s.cooldownMul *= this.meta.cooldownMul;
     }
+    // 저주 유물(강한 이득 + 대가)
+    for (const id of this.relicIds) {
+      const r = RELIC_BY_ID[id];
+      if (r) r.apply(s);
+    }
+    // 사당 임시 버프
+    if (this.buffAttackT > 0) s.damageMul *= 1.3;
+    if (this.buffSpeedT > 0) s.speedMul *= 1.25;
+  }
+
+  // 저주 유물 획득(최대 2개는 run이 관리). 스탯 재계산.
+  addRelic(id: string): void {
+    if (this.relicIds.includes(id)) return;
+    this.relicIds.push(id);
+    this.recomputeStats(this.curPassives);
+  }
+  get relicCount(): number {
+    return this.relicIds.length;
+  }
+
+  // 사당 30초 버프 적용. attack/speed는 스탯, musou는 게이지 충전 배수(run이 읽음).
+  applyBuff(kind: BuffKind, dur: number): void {
+    if (kind === 'attack') this.buffAttackT = Math.max(this.buffAttackT, dur);
+    else if (kind === 'speed') this.buffSpeedT = Math.max(this.buffSpeedT, dur);
+    else this.buffMusouT = Math.max(this.buffMusouT, dur);
+    this.recomputeStats(this.curPassives);
+  }
+  get musouBuffed(): boolean {
+    return this.buffMusouT > 0;
   }
 
   // 패시브 변경 시 호출: 스탯 재계산 + 최대체력 반영(현재 비율 유지).
@@ -148,6 +191,10 @@ export class Player {
   reset(passives: Record<string, number>): void {
     this.x = 0;
     this.z = 0;
+    this.relicIds = [];
+    this.buffAttackT = 0;
+    this.buffSpeedT = 0;
+    this.buffMusouT = 0;
     this.resetStats(passives);
     this.maxHp = this.baseHp * this.stats.maxHpMul;
     this.hp = this.maxHp;
@@ -183,6 +230,17 @@ export class Player {
     if (this.flash > 0) {
       this.flash -= dt * FLASH_DECAY;
       if (this.flash < 0) this.flash = 0;
+    }
+    // 사당 임시 버프 만료 → 스탯 재계산 (스탯 버프만 재계산 필요)
+    if (this.buffAttackT > 0 || this.buffSpeedT > 0 || this.buffMusouT > 0) {
+      const a0 = this.buffAttackT > 0;
+      const s0 = this.buffSpeedT > 0;
+      if (this.buffAttackT > 0) this.buffAttackT -= dt;
+      if (this.buffSpeedT > 0) this.buffSpeedT -= dt;
+      if (this.buffMusouT > 0) this.buffMusouT -= dt;
+      if ((a0 && this.buffAttackT <= 0) || (s0 && this.buffSpeedT <= 0)) {
+        this.recomputeStats(this.curPassives);
+      }
     }
     // 체력 재생 (백주)
     if (this.stats.hpRegen > 0 && this.hp < this.maxHp) {

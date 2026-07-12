@@ -4,6 +4,7 @@ import { PASSIVE_BY_ID } from '../data/passives';
 import { UPGRADE_DEFS, upgradeCost, LVBU_UNLOCK_COST } from '../data/upgrades';
 import { BOSS_DEFS } from '../game/boss';
 import { ACHIEVEMENT_BY_ID, ACHIEVEMENTS } from '../data/achievements';
+import { DIALOGUE, anyRandomLine } from '../data/dialogue';
 import { openSharePreview } from './shareCard';
 import type { SaveData } from '../core/save';
 import type { RunResult } from '../game/run';
@@ -165,6 +166,11 @@ export class Screens {
           '<b>WASD / 화살표</b> 이동 &nbsp;·&nbsp; <b>Space</b> 무쌍난무 &nbsp;·&nbsp; <b>Esc</b> 일시정지<br>모바일: 좌측 가상 조이스틱 + 우측 무쌍 버튼',
         ),
       );
+
+      // 타이틀 진입마다 장수 혼잣말 한 줄 (군웅전 대사)
+      const m = anyRandomLine();
+      if (m.line) s.appendChild(el('div', 'title-quote', `“${m.line}” <span class="who">— ${m.name}</span>`));
+
       this.overlay.appendChild(s);
     }, instant);
   }
@@ -195,6 +201,8 @@ export class Screens {
         card.appendChild(el('div', 'hero-line', `무기 <span class="k">${wname}</span>`));
         card.appendChild(el('div', 'hero-line', h.bonusText));
         card.appendChild(el('div', 'hero-musou', this.musouText(id)));
+        const quote = DIALOGUE[id]?.select;
+        if (quote && !locked) card.appendChild(el('div', 'hero-quote', `“${quote}”`));
         if (locked) {
           card.appendChild(el('div', 'hero-line', '본진에서 해금'));
           card.addEventListener('click', () => this.cb.onOpenShop('upgrade'));
@@ -234,6 +242,8 @@ export class Screens {
       const win = result.victory;
       s.appendChild(el('div', `result-title ${win ? 'win' : 'lose'}`, win ? '天下統一' : '戰死'));
       s.appendChild(el('div', 'result-sub', win ? '천하통일' : '전사'));
+      const quote = DIALOGUE[result.heroId]?.select;
+      if (quote) s.appendChild(el('div', 'result-quote', `“${quote}”`));
 
       // 업적 달성 토스트 (새로 달성한 것만)
       if (share.newAchievements.length > 0) {

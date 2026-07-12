@@ -22,7 +22,13 @@ type SfxKind =
   | 'evolve'
   | 'playerHit'
   | 'revive'
-  | 'uiClick';
+  | 'uiClick'
+  | 'relic' // 저주 유물 획득
+  | 'buff' // 사당 버프
+  | 'warn' // 전장 이벤트 경고
+  | 'fever' // 콤보 피버 진입
+  | 'explosion' // 화약통/유성 착탄
+  | 'achievement'; // 업적 달성
 
 interface BgmVoice {
   src: AudioBufferSourceNode;
@@ -277,6 +283,38 @@ class AudioSystem {
         break;
       case 'uiClick':
         this.playBlip(t, 440, 0.05, 'triangle', 0.12);
+        break;
+      case 'relic':
+        // 불길한 하강 스윕 + 저역 공 (저주받은 유물)
+        this.playSweep(t);
+        this.playGong(t, 147, 1.8, 0.4);
+        break;
+      case 'buff':
+        // 밝은 상승 공 2연 (사당 축복)
+        this.playGong(t, 587, 1.0, 0.34);
+        this.playGong(t + 0.07, 880, 0.9, 0.26);
+        break;
+      case 'warn':
+        // 낮은 뿔피리 경고
+        this.playHorn(t);
+        break;
+      case 'fever':
+        // 대북 + 상승 블립 (피버 진입)
+        this.playDrum(t);
+        this.playBlip(t, 660, 0.08, 'square', 0.16);
+        this.playBlip(t + 0.06, 990, 0.08, 'square', 0.14);
+        this.playBlip(t + 0.12, 1320, 0.08, 'square', 0.12);
+        break;
+      case 'explosion':
+        // 저역 펀치 + 노이즈 (폭발)
+        this.playThud(t);
+        this.playHit(t);
+        break;
+      case 'achievement':
+        // 밝은 3화음 공 (업적)
+        this.playGong(t, 659, 1.6, 0.34);
+        this.playGong(t + 0.09, 988, 1.4, 0.26);
+        this.playGong(t + 0.18, 1319, 1.2, 0.2);
         break;
     }
   }

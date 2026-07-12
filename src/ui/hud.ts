@@ -42,6 +42,8 @@ export class Hud {
   private readonly bossFill: HTMLDivElement;
   private readonly bossName: HTMLDivElement;
   private readonly bannerLayer: HTMLDivElement;
+  private readonly feverEl: HTMLDivElement;
+  private feverOn = false;
   private readonly slotBar: HTMLDivElement;
   private readonly bottom: HTMLDivElement;
   private readonly seenSlots = new Set<string>();
@@ -225,6 +227,35 @@ export class Hud {
       'font-family:"Nanum Myeongjo","Times New Roman",serif',
     ].join(';');
     document.body.appendChild(this.bannerLayer);
+
+    // 콤보 피버: 화면 가장자리 금색 불꽃(inset 글로우). opacity 토글.
+    this.feverEl = document.createElement('div');
+    this.feverEl.style.cssText = [
+      'position:fixed',
+      'inset:0',
+      'pointer-events:none',
+      'opacity:0',
+      'z-index:29',
+      'transition:opacity 0.25s',
+      'box-shadow:inset 0 0 120px 24px rgba(255,180,60,0.55),inset 0 0 40px 8px rgba(255,120,30,0.5)',
+    ].join(';');
+    document.body.appendChild(this.feverEl);
+  }
+
+  // 콤보 피버 화면 연출 on/off (진입 시 맥동 시작, 해제 시 페이드).
+  setFever(on: boolean): void {
+    if (on === this.feverOn) return;
+    this.feverOn = on;
+    if (on) {
+      this.feverEl.style.opacity = '1';
+      this.feverEl.animate(
+        [{ filter: 'brightness(1)' }, { filter: 'brightness(1.5)' }, { filter: 'brightness(1)' }],
+        { duration: 700, iterations: Infinity },
+      );
+    } else {
+      this.feverEl.style.opacity = '0';
+      this.feverEl.getAnimations().forEach((a) => a.cancel());
+    }
   }
 
   // 전투 HUD 표시/숨김 (메뉴 상태에서 숨김).
@@ -235,6 +266,7 @@ export class Hud {
     if (!v) {
       this.comboEl.style.display = 'none';
       this.bossWrap.style.display = 'none';
+      this.setFever(false);
     }
   }
 

@@ -20,8 +20,6 @@ export interface EventDeps {
   playerX: () => number;
   playerZ: () => number;
   hitPlayer: (dmg: number) => void; // 유성우 등 플레이어 피해
-  // TODO(통합): 보급 마차 처치 보상(골드+보물상자). run이 처리.
-  onSupplyReward?: (x: number, z: number) => void;
 }
 
 const METEOR_CAP = 40;
@@ -73,7 +71,7 @@ export class BattlefieldEvents {
     // === 트리거 ===
     if (this.cartFired < this.cartTimes.length && gameTime >= this.cartTimes[this.cartFired]) {
       this.cartFired++;
-      this.spawnSupplyCart();
+      this.spawnSupplyCart(gameTime);
     }
     if (!this.rush4 && gameTime >= 240) {
       this.rush4 = true;
@@ -95,6 +93,17 @@ export class BattlefieldEvents {
     if (this.rushRemaining > 0) this.tickRush(dt, gameTime);
     if (this.showerRemaining > 0) this.tickShower(dt);
     this.tickMeteorImpacts(dt);
+  }
+
+  // 테스트/디버그용 강제 트리거.
+  forceRush(): void {
+    this.startRush();
+  }
+  forceMeteor(): void {
+    this.startMeteorShower();
+  }
+  forceCart(gameTime: number): void {
+    this.spawnSupplyCart(gameTime);
   }
 
   // 황건 대군 러시: 30초간 한 방향에서 대군이 일직선으로 밀려온다.
@@ -187,12 +196,28 @@ export class BattlefieldEvents {
     }
   }
 
-  // 보급 마차: 발광 마차가 화면을 가로질러 도주. 처치 시 골드+보물상자, 놓치면 사라짐.
-  // TODO(통합): EnemyPool에 'flee'(플레이어 반대로 이동) 플래그가 필요.
-  //   enemies.ts에 flee Uint8 + update 분기 추가 → 여기서 spawn 후 flee=1, 골드 배수/보물 태그.
-  //   처치 감지는 run.handleKill에서 태그 확인 후 onSupplyReward 호출.
-  private spawnSupplyCart(): void {
-    this.d.banner('보급 마차 補給馬車', '#ffe14d');
-    // 착수 시 구현 (flee AI + 처치 보상 배선).
+  // 보급 마차: 발광 마차가 도주. 처치 시 골드 대량 + 보물상자(run.handleKill이 cart 플래그로 처리).
+  private spawnSupplyCart(gameTime: number): void {
+    const en = this.d.enemies;
+    const minute = gameTime / 60;
+    const hpScale = 1 + 0.13 * minute + 0.011 * minute * minute;
+    const px = this.d.playerX();
+    const pz = this.d.playerZ();
+    const a = this.d.rng.next() * Math.PI * 2;
+    const t = ENEMY_TYPES.runner;
+    const x = px + Math.cos(a) * 12;
+    const z = pz + Math.sin(a) * 12;
+    // 접촉 대미지 0(위협 아님), 도주 속도는 플레이어보다 느리게 → 추격 가능.
+    const i = en.spawn(x, z, 220 * hpScale, 3.6, 0.7, 0, 20, 1.3, SHEET_SOLDIERS, this.d.atlas.soldierBlockPx(t.charIndex), 0);
+    if (i < 0) return;
+    en.flee[i] = 1;
+    en.cart[i] = 1;
+    en.tr[i] = 2.4;
+    en.tg[i] = 1.9;
+    en.tb[i] = 0.6; // 금색 발광
+    en.labels[i] = '보급 마차 補給馬車';
+    en.markSpecial(i);
+    this.d.effects.spawnRing(x, z, 4, 2.4, 1.9, 0.6, 0.6);
+    this.d.banner('보급 마차 — 놓치지 마라!', '#ffe14d');
   }
 }

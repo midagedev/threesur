@@ -122,11 +122,13 @@ loadAtlas()
         weapons: result.weapons,
         totalKills: save.totalKills,
         totalWins: save.totalWins,
+        endless: result.endless,
       });
       const newAchievements = earned.filter((id) => !save.achievements.includes(id));
       for (const id of newAchievements) save.achievements.push(id);
       writeSave(save);
       audio.playJingle(result.victory ? 'victory' : 'defeat');
+      if (newAchievements.length > 0) audio.sfx('achievement');
       screens.showResult(result, save, records, { title: bestTitle(earned), newAchievements });
     }
     function onPause(): void {
@@ -243,6 +245,10 @@ loadAtlas()
       spawnBoss: (t: string) => run.testSpawnBoss(t),
       setBossFlags: (b3: boolean, b6: boolean, b9: boolean) => run.testSetBossFlags(b3, b6, b9),
       treasure: (boss?: boolean) => run.testTreasure(boss),
+      // Phase 4: 전장 이벤트/유물/무한 모드
+      triggerEvent: (name: string) => run.testTriggerEvent(name),
+      forceRelic: () => run.testForceRelic(),
+      enterEndless: () => run.testEnterEndless(),
       get stats() {
         return run.testStats;
       },

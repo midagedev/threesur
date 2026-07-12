@@ -59,7 +59,9 @@ export class Spawner {
   }
 
   private hpScale(minute: number): number {
-    return 1 + 0.13 * minute + 0.011 * minute * minute;
+    let s = 1 + 0.13 * minute + 0.011 * minute * minute;
+    if (minute > 10) s *= Math.pow(1.35, minute - 10); // 무한 모드: 매분 가속
+    return s;
   }
 
   update(dt: number, gameTime: number, px: number, pz: number): void {

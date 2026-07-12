@@ -55,7 +55,7 @@ export const HEROES: Record<string, HeroDef> = {
     dmgTakenMul: 1,
     startWeapon: 'guandao',
     bonusText: '공격력 +15%',
-    musou: 'common',
+    musou: 'guanyu',
   },
   zhangfei: {
     id: 'zhangfei',
@@ -73,7 +73,7 @@ export const HEROES: Record<string, HeroDef> = {
     dmgTakenMul: 1,
     startWeapon: 'zhangba',
     bonusText: '최대체력 +25%',
-    musou: 'common',
+    musou: 'zhangfei',
   },
   zhugeliang: {
     id: 'zhugeliang',
@@ -91,7 +91,7 @@ export const HEROES: Record<string, HeroDef> = {
     dmgTakenMul: 1,
     startWeapon: 'baiyu',
     bonusText: '쿨다운 -10%',
-    musou: 'common',
+    musou: 'zhugeliang',
   },
   huangzhong: {
     id: 'huangzhong',
@@ -109,7 +109,7 @@ export const HEROES: Record<string, HeroDef> = {
     dmgTakenMul: 1,
     startWeapon: 'crossbow',
     bonusText: '사거리·투사체속도 +20%',
-    musou: 'common',
+    musou: 'huangzhong',
   },
   lvbu: {
     id: 'lvbu',
@@ -127,7 +127,7 @@ export const HEROES: Record<string, HeroDef> = {
     dmgTakenMul: 1.25, // 받는 피해 +25%
     startWeapon: 'halberd',
     bonusText: '공격력 +25%, 받는 피해 +25%',
-    musou: 'common',
+    musou: 'lvbu',
     locked: true,
   },
 };

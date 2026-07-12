@@ -20,6 +20,10 @@ import { TreasurePool } from './treasure';
 import { Combo } from './combo';
 import { Musou } from './musou';
 import { Boss } from './boss';
+import { BattlefieldEvents } from './events';
+import { BattlefieldObjects } from './objects';
+import type { BuffKind } from './player';
+import { RELIC_BY_ID, rollRelic } from '../data/relics';
 import type { Weapon, WeaponContext } from './weapons/types';
 import { createWeapon } from './weapons/roster';
 import { LevelUp } from './levelup';
@@ -34,7 +38,7 @@ import type { MetaMods } from '../data/upgrades';
 import { rng } from '../core/rng';
 import { audio } from '../core/audio';
 
-type State = 'attract' | 'play' | 'levelup' | 'paused' | 'dead' | 'victory';
+type State = 'attract' | 'play' | 'levelup' | 'paused' | 'dead' | 'victory' | 'victoryChoice';
 
 // 런 종료 결과 (App이 저장·결과화면에 사용).
 export interface RunResult {
@@ -49,6 +53,7 @@ export interface RunResult {
   weapons: { id: string; level: number }[];
   passives: { id: string; level: number }[];
   bosses: string[]; // 처치한 보스 type id
+  endless: boolean; // 무한 모드 진입 여부(10분 승리 후 계속 전투)
 }
 
 // App이 주입하는 씬 전환 콜백.
@@ -67,7 +72,11 @@ type Choice =
   | { kind: 'upWeapon'; id: string }
   | { kind: 'newPassive'; id: string }
   | { kind: 'upPassive'; id: string }
+  | { kind: 'relic'; id: string }
   | { kind: 'reward'; id: 'heal' | 'gold' | 'xp' };
+
+const MAX_RELICS = 2;
+const RELIC_CHANCE = 0.1; // 레벨업 카드에 저주 유물 등장 확률
 
 // 씬 상태머신 훅: Phase 3에서 Title→Select→Run→Result가 이 위에 붙는다.
 export class Run {
@@ -103,6 +112,8 @@ export class Run {
   private readonly combo: Combo;
   private readonly musou: Musou;
   private readonly boss: Boss;
+  private readonly events: BattlefieldEvents;
+  private readonly objects: BattlefieldObjects;
 
   private readonly hud: Hud;
   private readonly levelup = new LevelUp();
@@ -128,6 +139,13 @@ export class Run {
   private bossFlags = { b3: false, b6: false, b9: false };
   private frameKills = 0;
   private rerolledThisLevel = false;
+  private relicIds: string[] = []; // 보유 저주 유물(카드 중복 방지·카운트)
+  private feverWasOn = false; // 콤보 피버 진입 감지
+  private endless = false; // 무한 모드(10분 승리 후 계속)
+  private victoryChoiceShown = false; // 승리 선택 오버레이 1회 표시
+  private victoryAchieved = false; // 10분 도달(이후 사망해도 승리 처리)
+  private forceRelicNext = false; // 테스트: 다음 레벨업 카드에 유물 강제
+  private readonly victoryOverlay: HTMLDivElement;
 
   // 히트스탑: 시뮬 dt만 스케일, 연출/카메라는 실제 dt 유지 (game-feel)
   private timeScale = 1;
@@ -174,6 +192,7 @@ export class Run {
     this.treasure = new TreasurePool(this.scene);
 
     this.player = new Player(atlas, this.hero);
+    this.player.setRimScale(touch ? 0.5 : 1); // 모바일 저해상도 블룸에서 림 과다 방지
     this.scene.add(this.player.mesh);
     this.spawner = new Spawner(atlas, this.enemies);
     this.weapons = [createWeapon(this.hero.startWeapon)];
@@ -190,6 +209,50 @@ export class Run {
       this.hud.banner(`${name} 등장 ${hanja}`, '#e85c4a', 44, 1800);
       audio.sfx('bossHorn');
       audio.playBgm('boss');
+    });
+
+    // 전장 이벤트 (보급 마차/황건 러시/유성우)
+    this.events = new BattlefieldEvents({
+      enemies: this.enemies,
+      zones: this.zones,
+      effects: this.effects,
+      particles: this.particles,
+      atlas,
+      rng,
+      banner: (text, color) => {
+        this.hud.banner(text, color, 44, 1800);
+        audio.sfx('warn');
+      },
+      playerX: () => this.player.x,
+      playerZ: () => this.player.z,
+      hitPlayer: (dmg) => {
+        this.onPlayerHit(dmg);
+      },
+    });
+
+    // 전장 오브젝트 (화약통/만두/사당)
+    this.objects = new BattlefieldObjects(this.scene, {
+      effects: this.effects,
+      particles: this.particles,
+      rng,
+      playerX: () => this.player.x,
+      playerZ: () => this.player.z,
+      playerRadius: this.player.radius,
+      damageArea: (x, z, r, dmg) => {
+        this.shockwave(x, z, r, dmg);
+        audio.sfx('explosion');
+      },
+      heal: (frac) => {
+        this.player.heal(this.player.maxHp * frac);
+        audio.sfx('buff');
+      },
+      applyBuff: (kind: BuffKind, dur) => {
+        this.player.applyBuff(kind, dur);
+        audio.sfx('buff');
+      },
+      banner: (text, color) => {
+        this.hud.banner(text, color, 40, 1400);
+      },
     });
 
     // 재사용 무기 컨텍스트 (프레임당 할당 회피)
@@ -227,6 +290,36 @@ export class Run {
       'background:radial-gradient(ellipse at center, rgba(0,0,0,0) 40%, rgba(180,30,24,0.85) 100%)',
     ].join(';');
     document.body.appendChild(this.damageFlash);
+
+    // 10분 승리 선택 오버레이 (계속 싸운다 → 무한 모드 / 결과 보기 → 종료). 자체 DOM.
+    this.victoryOverlay = document.createElement('div');
+    this.victoryOverlay.style.cssText = [
+      'position:fixed', 'inset:0', 'display:none', 'flex-direction:column', 'align-items:center',
+      'justify-content:center', 'gap:18px', 'background:rgba(6,7,12,0.86)', 'z-index:41',
+      'font-family:"Nanum Myeongjo","Times New Roman",serif', 'text-align:center',
+    ].join(';');
+    this.victoryOverlay.innerHTML =
+      '<div style="color:#ffe9a8;font-size:58px;letter-spacing:10px;text-shadow:0 0 24px rgba(255,233,168,0.7);">天下統一</div>' +
+      '<div style="color:#f0e4c0;font-size:19px;letter-spacing:3px;">천하통일 — 계속 싸우겠는가?</div>';
+    const vrow = document.createElement('div');
+    vrow.style.cssText = 'display:flex;gap:16px;margin-top:8px;';
+    const mkVBtn = (label: string, primary: boolean, onClick: () => void): void => {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.style.cssText = [
+        'padding:12px 24px', 'border-radius:8px', 'cursor:pointer', 'font-size:16px',
+        'letter-spacing:2px', 'font-family:inherit',
+        primary
+          ? 'background:linear-gradient(180deg,#e8c667,#a8791f);color:#161006;border:none;'
+          : 'background:transparent;color:#e8c667;border:1px solid #6b5a2e;',
+      ].join(';');
+      btn.addEventListener('click', onClick);
+      vrow.appendChild(btn);
+    };
+    mkVBtn('계속 싸운다 無限', true, () => this.continueEndless());
+    mkVBtn('결과 보기 結果', false, () => this.finish(true));
+    this.victoryOverlay.appendChild(vrow);
+    document.body.appendChild(this.victoryOverlay);
   }
 
   private flashDamage(peak: number, durationMs: number): void {
@@ -287,6 +380,8 @@ export class Run {
     this.spawner.reset();
     this.combo.reset();
     this.musou.reset();
+    this.events.reset();
+    this.objects.reset();
     this.boss.active = false;
     this.boss.idx = -1;
   }
@@ -309,6 +404,14 @@ export class Run {
     this.timeScale = 1;
     this.hitstopRemaining = 0;
     this.musouStrength = 0;
+    this.relicIds = [];
+    this.endless = false;
+    this.victoryChoiceShown = false;
+    this.victoryAchieved = false;
+    this.forceRelicNext = false;
+    this.feverWasOn = false;
+    this.victoryOverlay.style.display = 'none';
+    this.hud.setFever(false);
     // 메타: 부활 + 시작 레벨
     this.reviveAvailable = this.meta?.revive ?? false;
     this.reviveUsed = false;
@@ -349,7 +452,7 @@ export class Run {
 
   // 포기 (일시정지 메뉴). 현재 상태로 패배 결과 방출.
   abandon(): void {
-    if (this.state === 'paused' || this.state === 'play') this.finish(false);
+    if (this.state === 'paused' || this.state === 'play') this.finish(this.victoryAchieved);
   }
 
   get musouGauge(): number {
@@ -379,8 +482,8 @@ export class Run {
       return;
     }
 
-    // 종료 상태: 결과 화면이 위에 뜬 채 마지막 프레임을 정지 렌더.
-    if (this.state === 'dead' || this.state === 'victory') return;
+    // 종료/선택 상태: 오버레이가 위에 뜬 채 마지막 프레임을 정지(버튼은 DOM으로 동작).
+    if (this.state === 'dead' || this.state === 'victory' || this.state === 'victoryChoice') return;
 
     if (this.state === 'levelup') {
       if (this.input.consumePressed('Digit1')) this.pickCard(0);
@@ -407,6 +510,7 @@ export class Run {
     const gdt = dt * this.timeScale;
     const edt = gdt * this.musou.enemyTimeScale; // 적 전용 dt (무쌍 슬로우)
     this.frameKills = 0;
+    this.musou.chargeMul = this.player.musouBuffed ? 2 : 1; // 사당 '무쌍 충전' 버프
 
     // === 시뮬레이션 ===
     this.gameTime += gdt;
@@ -435,6 +539,8 @@ export class Run {
     // 보스 패턴 (적 dt)
     this.ctx.dt = edt;
     this.boss.update(edt, this.ctx, this.enemyProj, this.player.x, this.player.z);
+    // 전장 이벤트(보급 마차/황건 러시/유성우) — 적 dt로 진행
+    this.events.update(edt, this.gameTime);
     this.ctx.dt = gdt;
 
     // 이동 후 해시 재구성 (무기/접촉 판정)
@@ -448,6 +554,10 @@ export class Run {
       this.damageText, this.ctx.onKill, this.particles, this.scratch,
     );
     this.zones.update(gdt, this.enemies, this.hash, this.damageText, this.ctx.onKill, this.particles, this.scratch);
+
+    // 전장 오브젝트: 접촉(만두/사당) + 화약통은 플레이어 근접 시 무기 판정으로 유폭
+    this.objects.update(gdt, this.gameTime);
+    this.objects.hitAt(this.player.x, this.player.z, 4.0);
 
     // 무쌍 난무 (실제 dt로 진행, 종료 시 마무리 충격파)
     this.ctx.dt = dt;
@@ -472,6 +582,11 @@ export class Run {
 
     // 연출 (실제 dt)
     this.combo.update(gdt);
+    // 콤보 피버: 화면 연출 + 진입 사운드 (XP 1.5배는 onCollect에서)
+    const fever = this.combo.fever;
+    this.hud.setFever(fever);
+    if (fever && !this.feverWasOn) audio.sfx('fever');
+    this.feverWasOn = fever;
     this.effects.update(dt);
     this.particles.update(dt);
     this.damageText.update(dt);
@@ -489,9 +604,9 @@ export class Run {
     // 레벨업 대기
     if (this.pendingLevels > 0 && this.state === 'play') this.showNextLevelUp();
 
-    // 종료 판정 (사망 → 부활 또는 결과, 시간 만료 → 승리)
+    // 종료 판정 (사망 → 부활 또는 결과, 10분 도달 → 승리 선택)
     if (this.player.dead) this.onPlayerDeath();
-    else if (this.gameTime >= RUN_LENGTH) this.finish(true);
+    else if (!this.endless && !this.victoryChoiceShown && this.gameTime >= RUN_LENGTH) this.showVictoryChoice();
     // 종료된 프레임은 HUD 갱신 생략(숨김 상태 유지).
     if (this.ended) return;
 
@@ -544,6 +659,7 @@ export class Run {
     this.zones.render(this.renderTime);
     this.enemyProj.render(this.renderTime);
     this.treasure.render();
+    this.objects.render(this.renderTime);
   }
 
   // 엘리트/보스 머리 위 이름표 갱신 (specials 리스트 사용, 죽은 항목 지연 제거)
@@ -558,6 +674,10 @@ export class Run {
         continue;
       }
       this.labels.place(en.labels[i]!, en.x[i], en.scale[i] * 1.05, en.z[i]);
+      // 보급 마차 금색 트레일
+      if (en.cart[i] === 1 && Math.random() < 0.6) {
+        this.particles.emit(en.x[i], 0.8, en.z[i], 0, 0.5, 0, 2.2, 1.8, 0.6, 0.6, 0.5, -0.4, 0.9);
+      }
     }
     this.labels.end();
   }
@@ -605,6 +725,18 @@ export class Run {
     const en = this.enemies;
     const x = en.x[i];
     const z = en.z[i];
+    if (en.cart[i] === 1) {
+      // 보급 마차 확보: 골드 대량 + 보물상자
+      this.particles.burst(x, z, 2.6, 2.0, 0.7, 30, 6);
+      this.effects.spawnRing(x, z, 7, 2.6, 2.0, 0.7, 0.6);
+      this.treasure.spawn(x, z, false);
+      this.addGold(Math.round(400 * this.player.stats.goldMul));
+      this.hud.banner('보급 확보 補給確保', '#ffe14d', 52, 1500);
+      audio.sfx('levelup');
+      this.kills++;
+      en.kill(i);
+      return;
+    }
     if (en.boss[i] === 1) {
       // 보스 처치: 대형 폭발 + 보물상자 + 큰 보상 + BGM 복귀 + 도감 기록
       this.particles.burst(x, z, 2.6, 1.6, 0.7, 60, 8);
@@ -651,7 +783,8 @@ export class Run {
   }
 
   private readonly onCollect = (value: number): void => {
-    this.xp += value * this.player.stats.xpMul;
+    const feverMul = this.combo.fever ? 1.5 : 1; // 콤보 피버 시 XP 1.5배
+    this.xp += value * this.player.stats.xpMul * feverMul;
     audio.sfx('gem');
     this.particles.emit(this.player.x, 1.0, this.player.z, 0, 1.5, 0, 0.4, 0.8, 2.2, 0.7, 0.4, 3, 0.9);
     while (this.xp >= this.nextXp) {
@@ -770,6 +903,12 @@ export class Run {
       const r = (['heal', 'gold', 'xp'] as const)[out.length % 3];
       out.push({ kind: 'reward', id: r });
     }
+    // 저주 유물: 10% 확률(또는 테스트 강제)로 한 칸을 유물로 교체 (최대 2개 보유)
+    if (this.relicIds.length < MAX_RELICS && (this.forceRelicNext || rng.next() < RELIC_CHANCE)) {
+      const relic = rollRelic(() => rng.next(), this.relicIds);
+      if (relic) out[rng.int(out.length)] = { kind: 'relic', id: relic.id };
+      this.forceRelicNext = false;
+    }
     return out;
   }
 
@@ -801,6 +940,10 @@ export class Run {
       const d = PASSIVE_BY_ID[c.id];
       const lvl = this.passives[c.id];
       return { title: d.name, hanja: d.hanja, desc: d.desc(lvl + 1), tag: `패시브 Lv${lvl}→${lvl + 1}`, accent: '#7ec8ff', symbol: d.hanja[0], badge: '강화', rare: d.rare };
+    }
+    if (c.kind === 'relic') {
+      const d = RELIC_BY_ID[c.id];
+      return { title: d.name, hanja: d.hanja, desc: d.desc, tag: '저주 유물', accent: '#c77dff', symbol: d.hanja[0], badge: '저주', rare: true };
     }
     // reward
     const map = {
@@ -835,6 +978,10 @@ export class Run {
     } else if (c.kind === 'upPassive') {
       this.passives[c.id]++;
       this.player.recomputeStats(this.passives);
+    } else if (c.kind === 'relic') {
+      this.relicIds.push(c.id);
+      this.player.addRelic(c.id);
+      audio.sfx('relic');
     } else {
       if (c.id === 'heal') this.player.heal(this.player.maxHp * 0.5);
       else if (c.id === 'gold') this.gold += 200; // 런 내 리롤용(메타 적립 아님)
@@ -855,7 +1002,27 @@ export class Run {
       audio.sfx('revive');
       return;
     }
-    this.finish(false);
+    this.finish(this.victoryAchieved); // 무한 모드 중 사망도 승리로 처리(10분 도달)
+  }
+
+  // 10분 도달: 승리 선택 오버레이(계속 싸운다 / 결과 보기).
+  private showVictoryChoice(): void {
+    this.victoryChoiceShown = true;
+    this.victoryAchieved = true;
+    this.state = 'victoryChoice';
+    this.rig.addTrauma(0.4);
+    audio.sfx('achievement');
+    this.hud.banner('天下統一', '#ffe9a8', 90, 1600);
+    this.victoryOverlay.style.display = 'flex';
+  }
+
+  // 무한 모드 진입: 계속 전투(스케일 무한 증가).
+  private continueEndless(): void {
+    this.endless = true;
+    this.victoryOverlay.style.display = 'none';
+    this.state = 'play';
+    this.hud.banner('무한 전투 無限', '#e85c4a', 56, 1600);
+    audio.playBgm('battle');
   }
 
   // 부활 충격파: 주변 적에게 대미지 + 넉백.
@@ -879,6 +1046,8 @@ export class Run {
   private finish(victory: boolean): void {
     if (this.ended) return;
     this.ended = true;
+    this.victoryOverlay.style.display = 'none';
+    this.hud.setFever(false);
     this.state = victory ? 'victory' : 'dead';
     if (victory) {
       this.rig.addTrauma(0.5);
@@ -900,6 +1069,7 @@ export class Run {
       weapons: this.weapons.map((w) => ({ id: w.id, level: w.level })),
       passives: Object.keys(this.passives).map((id) => ({ id, level: this.passives[id] })),
       bosses: Array.from(this.bossesKilled),
+      endless: this.endless,
     };
     this.hooks.onEnd(result);
   }
@@ -958,6 +1128,24 @@ export class Run {
   testSetBossFlags(b3: boolean, b6: boolean, b9: boolean): void {
     this.bossFlags = { b3, b6, b9 };
   }
+  // 전장 이벤트 강제 (rush/meteor/cart)
+  testTriggerEvent(name: string): void {
+    if (name === 'rush') this.events.forceRush();
+    else if (name === 'meteor') this.events.forceMeteor();
+    else if (name === 'cart') this.events.forceCart(this.gameTime);
+  }
+  // 다음 레벨업 카드에 저주 유물 강제 + 즉시 레벨업
+  testForceRelic(): void {
+    this.forceRelicNext = true;
+    this.testForceLevel();
+  }
+  // 무한 모드 즉시 진입 (10분 승리 후 계속)
+  testEnterEndless(): void {
+    this.victoryAchieved = true;
+    this.victoryChoiceShown = true;
+    this.endless = true;
+    if (this.gameTime < 601) this.gameTime = 601;
+  }
   get testStats() {
     return {
       time: this.gameTime,
@@ -972,6 +1160,9 @@ export class Run {
       passives: { ...this.passives },
       musou: this.musou.gauge,
       bossActive: this.boss.active,
+      relics: [...this.relicIds],
+      endless: this.endless,
+      fever: this.combo.fever,
       state: this.state,
     };
   }

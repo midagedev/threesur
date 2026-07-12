@@ -56,6 +56,9 @@ export class EnemyPool {
   readonly elite = new Uint8Array(ENEMY_CAP);
   readonly boss = new Uint8Array(ENEMY_CAP);
   readonly controlled = new Uint8Array(ENEMY_CAP); // 보스: 외부에서 위치 제어
+  readonly stun = new Float32Array(ENEMY_CAP); // 스턴 잔여 시간(장비 무쌍) — 이동/발사 정지
+  readonly flee = new Uint8Array(ENEMY_CAP); // 1이면 플레이어 반대로 도주(보급 마차)
+  readonly cart = new Uint8Array(ENEMY_CAP); // 1이면 보급 마차(처치 시 골드 대량+보물)
   readonly labels: (string | null)[] = new Array(ENEMY_CAP).fill(null);
 
   // 엘리트/보스 인덱스(이름표/특수 처리용). 죽은 항목은 지연 제거.
@@ -114,6 +117,9 @@ export class EnemyPool {
     this.elite[i] = 0;
     this.boss[i] = 0;
     this.controlled[i] = 0;
+    this.stun[i] = 0;
+    this.flee[i] = 0;
+    this.cart[i] = 0;
     this.labels[i] = null;
     this.alive[i] = 1;
     this.aliveCount++;
@@ -208,9 +214,29 @@ export class EnemyPool {
         continue;
       }
 
+      // 스턴(장비 무쌍): 이동/발사 정지, 넉백만 감쇠 적용.
+      if (this.stun[i] > 0) {
+        this.stun[i] -= dt;
+        this.x[i] = xi + this.kbx[i] * dt;
+        this.z[i] = zi + this.kbz[i] * dt;
+        const kds = Math.max(0, 1 - KB_DECAY * dt);
+        this.kbx[i] *= kds;
+        this.kbz[i] *= kds;
+        continue;
+      }
+
       const sp = this.speed[i];
       let vx = dx * sp;
       let vz = dz * sp;
+      // 도주(보급 마차): 플레이어 반대로 빠르게. 추적/발사 로직 스킵.
+      if (this.flee[i] === 1) {
+        this.x[i] = xi - dx * sp * dt;
+        this.z[i] = zi - dz * sp * dt;
+        this.dir[i] = dirFromVelocity(-dx, -dz, this.dir[i]);
+        this.animTime[i] += dt;
+        this.frame[i] = (((this.animTime[i] * ANIM_FPS) | 0) % 4) as number;
+        continue;
+      }
 
       // 원거리: 사거리 유지 + 발사
       if (this.ranged[i] === 1) {
