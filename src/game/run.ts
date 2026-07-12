@@ -25,13 +25,37 @@ import { createWeapon } from './weapons/roster';
 import { LevelUp } from './levelup';
 import type { CardView } from './levelup';
 import { Hud } from '../ui/hud';
-import type { HudState } from '../ui/hud';
+import type { HudState, SlotView } from '../ui/hud';
 import { HEROES } from '../data/heroes';
+import type { HeroDef } from '../data/heroes';
 import { WEAPON_DEFS, EVOLUTIONS } from '../data/weapons';
 import { PASSIVE_DEFS, PASSIVE_BY_ID } from '../data/passives';
+import type { MetaMods } from '../data/upgrades';
 import { rng } from '../core/rng';
+import { audio } from '../core/audio';
 
-type State = 'play' | 'levelup' | 'paused' | 'dead' | 'victory';
+type State = 'attract' | 'play' | 'levelup' | 'paused' | 'dead' | 'victory';
+
+// 런 종료 결과 (App이 저장·결과화면에 사용).
+export interface RunResult {
+  victory: boolean;
+  heroId: string;
+  time: number;
+  kills: number;
+  maxCombo: number;
+  level: number;
+  goldEarned: number; // 전투 골드 + 콤보 보너스
+  comboBonus: number;
+  weapons: { id: string; level: number }[];
+  passives: { id: string; level: number }[];
+  bosses: string[]; // 처치한 보스 type id
+}
+
+// App이 주입하는 씬 전환 콜백.
+export interface RunHooks {
+  onEnd: (result: RunResult) => void; // 사망/승리 시
+  onPause: () => void; // Esc 일시정지 → App이 메뉴 표시
+}
 
 const MAX_WEAPONS = 6;
 const MAX_PASSIVES = 6;
@@ -80,18 +104,27 @@ export class Run {
   private readonly musou: Musou;
   private readonly boss: Boss;
 
-  private readonly hud = new Hud();
+  private readonly hud: Hud;
   private readonly levelup = new LevelUp();
-  private readonly overlay: HTMLDivElement;
+  private readonly hooks: RunHooks;
 
-  private state: State = 'play';
+  private hero: HeroDef = HEROES.zhaoyun;
+  private meta: MetaMods | null = null;
+  private state: State = 'attract';
   private gameTime = 0;
   private kills = 0;
   private level = 1;
   private xp = 0;
   private nextXp = 5 + 1 * 10;
   private pendingLevels = 0;
-  private gold = 0;
+  private gold = 0; // 런 중 사용 가능 골드 (리롤에 소비)
+  private goldEarned = 0; // 전투로 번 골드 누적 (메타 적립용, 리롤 무관)
+  private maxCombo = 0;
+  private readonly bossesKilled = new Set<string>();
+  private reviveAvailable = false;
+  private reviveUsed = false;
+  private ended = false; // onEnd 중복 방지
+  private attractTime = 0;
   private bossFlags = { b3: false, b6: false, b9: false };
   private frameKills = 0;
   private rerolledThisLevel = false;
@@ -109,10 +142,12 @@ export class Run {
   private readonly damageFlash: HTMLDivElement;
   private curChoices: Choice[] = [];
 
-  constructor(atlas: Atlas, rig: CameraRig, input: Input) {
+  constructor(atlas: Atlas, rig: CameraRig, input: Input, hooks: RunHooks, touch = false) {
     this.atlas = atlas;
     this.rig = rig;
     this.input = input;
+    this.hooks = hooks;
+    this.hud = new Hud(touch);
 
     this.ground = new Ground(this.scene);
     this.soldiersR = new InstancedSpriteRenderer(atlas.soldiers, ENEMY_CAP);
@@ -138,20 +173,24 @@ export class Run {
     this.enemyProj = new EnemyProjectilePool(this.scene);
     this.treasure = new TreasurePool(this.scene);
 
-    const hero = HEROES.zhaoyun;
-    this.player = new Player(atlas, hero);
+    this.player = new Player(atlas, this.hero);
     this.scene.add(this.player.mesh);
     this.spawner = new Spawner(atlas, this.enemies);
-    this.weapons = [createWeapon(hero.startWeapon)];
+    this.weapons = [createWeapon(this.hero.startWeapon)];
 
     this.combo = new Combo(
       (text) => this.hud.banner(text, '#e8c667', 60),
       () => this.hud.punchCombo(),
     );
-    this.musou = new Musou(hero.musou, () => this.hud.banner('無雙', '#ffe9a8', 120, 1200));
-    this.boss = new Boss(atlas, (name, hanja) =>
-      this.hud.banner(`${name} 등장 ${hanja}`, '#e85c4a', 44, 1800),
-    );
+    this.musou = new Musou(this.hero.musou, () => {
+      this.hud.banner('無雙', '#ffe9a8', 120, 1200);
+      audio.sfx('musou');
+    });
+    this.boss = new Boss(atlas, (name, hanja) => {
+      this.hud.banner(`${name} 등장 ${hanja}`, '#e85c4a', 44, 1800);
+      audio.sfx('bossHorn');
+      audio.playBgm('boss');
+    });
 
     // 재사용 무기 컨텍스트 (프레임당 할당 회피)
     this.ctx = {
@@ -176,22 +215,6 @@ export class Run {
 
     // 낙뢰 화면 미세 플래시 훅
     this.effects.screenFlash = (i: number) => this.flashScreen(i);
-
-    this.overlay = document.createElement('div');
-    this.overlay.style.cssText = [
-      'position:fixed',
-      'inset:0',
-      'display:none',
-      'flex-direction:column',
-      'align-items:center',
-      'justify-content:center',
-      'gap:16px',
-      'background:rgba(6,7,12,0.8)',
-      'z-index:35',
-      'font-family:"Nanum Myeongjo","Times New Roman",serif',
-      'text-align:center',
-    ].join(';');
-    document.body.appendChild(this.overlay);
 
     // 피격/사망 데미지 비네트 (붉은 방사형)
     this.damageFlash = document.createElement('div');
@@ -227,11 +250,33 @@ export class Run {
     this.timeScale = scale;
   }
 
-  start(): void {
+  // 장수 교체 (선택 화면). 스프라이트/스탯/무쌍 종류 갱신.
+  setHero(heroId: string): void {
+    const h = HEROES[heroId];
+    if (!h) return;
+    this.hero = h;
+    this.player.setHero(h);
+    this.musou.setHero(h.musou);
+  }
+
+  // 타이틀/선택/상점 배경용 어트랙트 모드(적 없이 지면+반딧불만, 플레이어 숨김).
+  enterAttract(): void {
+    this.resetPools();
+    this.player.mesh.visible = false;
+    this.hud.setVisible(false);
+    this.state = 'attract';
+    this.attractTime = 0;
+  }
+
+  // 런 시작: 장수 + 메타 강화 적용 후 플레이 진입.
+  beginRun(heroId: string, meta: MetaMods): void {
+    this.setHero(heroId);
+    this.meta = meta;
+    this.player.setMeta(meta);
     this.restart();
   }
 
-  private restart(): void {
+  private resetPools(): void {
     this.enemies.reset();
     this.gems.reset();
     this.projectiles.reset();
@@ -244,32 +289,99 @@ export class Run {
     this.musou.reset();
     this.boss.active = false;
     this.boss.idx = -1;
+  }
+
+  private restart(): void {
+    this.resetPools();
     this.passives = {};
     this.player.reset(this.passives);
-    this.weapons = [createWeapon(this.player.hero.startWeapon)];
+    this.player.mesh.visible = true;
+    this.weapons = [createWeapon(this.hero.startWeapon)];
     this.gameTime = 0;
     this.kills = 0;
-    this.level = 1;
     this.xp = 0;
-    this.nextXp = 5 + 1 * 10;
-    this.pendingLevels = 0;
     this.gold = 0;
+    this.goldEarned = 0;
+    this.maxCombo = 0;
+    this.bossesKilled.clear();
+    this.ended = false;
     this.bossFlags = { b3: false, b6: false, b9: false };
     this.timeScale = 1;
     this.hitstopRemaining = 0;
     this.musouStrength = 0;
+    // 메타: 부활 + 시작 레벨
+    this.reviveAvailable = this.meta?.revive ?? false;
+    this.reviveUsed = false;
+    const startLv = this.meta?.startLevel ?? 0;
+    this.level = 1 + startLv;
+    this.nextXp = 5 + this.level * 10;
+    this.pendingLevels = startLv;
+    this.hud.setVisible(true);
+    this.hud.resetSlots();
+    this.refreshLoadout();
     this.state = 'play';
-    this.overlay.style.display = 'none';
+    audio.playBgm('battle');
+  }
+
+  // 좌상단 무기/패시브 슬롯 바 갱신 (변경 시에만 호출).
+  private refreshLoadout(): void {
+    const wv: SlotView[] = [];
+    for (const w of this.weapons) {
+      wv.push({ id: w.id, glyph: (WEAPON_DEFS[w.id]?.hanja ?? '?')[0], level: w.level, accent: '#e8c667' });
+    }
+    const pv: SlotView[] = [];
+    for (const id in this.passives) {
+      pv.push({ id, glyph: (PASSIVE_BY_ID[id]?.hanja ?? '?')[0], level: this.passives[id], accent: '#7ec8ff' });
+    }
+    this.hud.setLoadout(wv, pv);
+  }
+
+  // 일시정지 (Esc). App이 메뉴 표시.
+  pause(): void {
+    if (this.state !== 'play') return;
+    this.state = 'paused';
+    this.hooks.onPause();
+  }
+
+  resume(): void {
+    if (this.state === 'paused') this.state = 'play';
+  }
+
+  // 포기 (일시정지 메뉴). 현재 상태로 패배 결과 방출.
+  abandon(): void {
+    if (this.state === 'paused' || this.state === 'play') this.finish(false);
+  }
+
+  get musouGauge(): number {
+    return this.musou.gauge;
+  }
+  get musouReadyFlag(): boolean {
+    return this.musou.ready;
+  }
+  get currentState(): State {
+    return this.state;
   }
 
   update(dt: number): void {
     this.renderTime += dt;
 
-    // 상태 전환 입력
-    if (this.state === 'dead' || this.state === 'victory') {
-      if (this.input.consumePressed('KeyR')) this.restart();
+    // 어트랙트(메뉴 배경): 지면/반딧불/파티클 + 느린 카메라 드리프트만.
+    if (this.state === 'attract') {
+      this.attractTime += dt;
+      const tx = Math.sin(this.attractTime * 0.06) * 5;
+      const tz = Math.cos(this.attractTime * 0.05) * 5;
+      this.ground.update(dt, tx, tz);
+      this.particles.update(dt);
+      this.effects.update(dt);
+      this.rig.update(dt, tx, tz);
+      this.musouStrength += (0 - this.musouStrength) * Math.min(1, dt * 6);
+      this.renderSprites();
       return;
     }
+
+    // 종료 상태: 결과 화면이 위에 뜬 채 마지막 프레임을 정지 렌더.
+    if (this.state === 'dead' || this.state === 'victory') return;
+
     if (this.state === 'levelup') {
       if (this.input.consumePressed('Digit1')) this.pickCard(0);
       else if (this.input.consumePressed('Digit2')) this.pickCard(1);
@@ -277,7 +389,7 @@ export class Run {
       return;
     }
     if (this.input.consumePressed('Escape') || this.input.consumePressed('KeyP')) {
-      this.togglePause();
+      this.pause();
     }
     if (this.state === 'paused') return;
 
@@ -377,9 +489,11 @@ export class Run {
     // 레벨업 대기
     if (this.pendingLevels > 0 && this.state === 'play') this.showNextLevelUp();
 
-    // 종료 판정
-    if (this.player.dead) this.enterDead();
-    else if (this.gameTime >= RUN_LENGTH) this.enterVictory();
+    // 종료 판정 (사망 → 부활 또는 결과, 시간 만료 → 승리)
+    if (this.player.dead) this.onPlayerDeath();
+    else if (this.gameTime >= RUN_LENGTH) this.finish(true);
+    // 종료된 프레임은 HUD 갱신 생략(숨김 상태 유지).
+    if (this.ended) return;
 
     this.hud.update(this.buildHudState());
   }
@@ -393,6 +507,7 @@ export class Run {
       nextXp: this.nextXp,
       hp: this.player.hp,
       maxHp: this.player.maxHp,
+      gold: this.gold,
       musouPct: this.musou.gauge,
       musouReady: this.musou.ready,
       combo: this.combo.count,
@@ -419,7 +534,7 @@ export class Run {
 
   private renderSprites(): void {
     this.shadowR.begin();
-    this.shadowR.push(this.player.x, this.player.z, this.player.radius * 1.6);
+    if (this.state !== 'attract') this.shadowR.push(this.player.x, this.player.z, this.player.radius * 1.6);
     this.enemies.render(
       this.atlas, this.soldiersR, this.variantsR, this.sgradeR, this.apriorityR, this.shadowR,
     );
@@ -467,6 +582,7 @@ export class Run {
       this.rig.addTrauma(0.5);
       this.flashDamage(0.45, 320);
       this.musou.addHit();
+      audio.sfx('playerHit');
     }
   }
 
@@ -475,16 +591,22 @@ export class Run {
       this.rig.addTrauma(0.4);
       this.flashDamage(0.4, 300);
       this.musou.addHit();
+      audio.sfx('playerHit');
     }
     return true;
   };
+
+  private addGold(amount: number): void {
+    this.gold += amount;
+    this.goldEarned += amount;
+  }
 
   private handleKill(i: number): void {
     const en = this.enemies;
     const x = en.x[i];
     const z = en.z[i];
     if (en.boss[i] === 1) {
-      // 보스 처치: 대형 폭발 + 보물상자 + 큰 보상
+      // 보스 처치: 대형 폭발 + 보물상자 + 큰 보상 + BGM 복귀 + 도감 기록
       this.particles.burst(x, z, 2.6, 1.6, 0.7, 60, 8);
       this.effects.spawnRing(x, z, 16, 2.4, 1.6, 0.8, 0.7);
       this.effects.spawnRing(x, z, 10, 2.2, 1.2, 2.0, 0.5);
@@ -493,7 +615,10 @@ export class Run {
       this.rig.addTrauma(0.9);
       this.flashScreen(0.4);
       this.hud.banner('討伐', '#e8c667', 90, 1600);
-      this.gold += Math.round(300 * this.player.stats.goldMul);
+      audio.sfx('levelup');
+      if (this.boss.typeId) this.bossesKilled.add(this.boss.typeId);
+      audio.playBgm('battle'); // 보스 처치 → 전투 BGM 복귀
+      this.addGold(Math.round(300 * this.player.stats.goldMul));
       this.kills++;
       en.kill(i);
       return;
@@ -504,7 +629,8 @@ export class Run {
       this.treasure.spawn(x, z, false);
       this.hitstop(60, 0.06);
       this.rig.addTrauma(0.4);
-      this.gold += Math.round(50 * this.player.stats.goldMul);
+      audio.sfx('hit');
+      this.addGold(Math.round(50 * this.player.stats.goldMul));
       this.kills++;
       en.kill(i);
       return;
@@ -512,10 +638,12 @@ export class Run {
     // 일반: 사망 파티클 버스트(적 틴트) + 젬
     this.particles.burst(x, z, 2.2 * en.tr[i], 1.3 * en.tg[i], 0.5 * en.tb[i], 14, 4.5);
     this.gems.spawn(x, z, en.gemValue[i]);
-    this.gold += this.player.stats.goldMul; // 소량 누적(리롤용)
+    this.addGold(this.player.stats.goldMul); // 소량 누적
     this.kills++;
     this.frameKills++;
+    audio.sfx('hit');
     const bonus = this.combo.onKill();
+    if (this.combo.count > this.maxCombo) this.maxCombo = this.combo.count;
     if (bonus > 0) this.xp += bonus * this.player.stats.xpMul;
     this.musou.addKill(this.combo.count);
     this.rig.punchFov(-0.5); // 미세 펀치줌
@@ -524,6 +652,7 @@ export class Run {
 
   private readonly onCollect = (value: number): void => {
     this.xp += value * this.player.stats.xpMul;
+    audio.sfx('gem');
     this.particles.emit(this.player.x, 1.0, this.player.z, 0, 1.5, 0, 0.4, 0.8, 2.2, 0.7, 0.4, 3, 0.9);
     while (this.xp >= this.nextXp) {
       this.xp -= this.nextXp;
@@ -531,6 +660,7 @@ export class Run {
       this.nextXp = 5 + this.level * 10;
       this.pendingLevels++;
       this.hud.punchLevel();
+      audio.sfx('levelup');
     }
   };
 
@@ -540,11 +670,13 @@ export class Run {
     const evo = this.tryEvolve();
     if (evo) {
       this.hud.banner(`진화! ${evo}`, '#ff9a3c', 56, 1800);
+      audio.sfx('evolve');
+      this.refreshLoadout();
       return;
     }
     // 고급 보상: 회복 + 골드 + 경험치
     this.player.heal(this.player.maxHp * (boss ? 0.6 : 0.35));
-    this.gold += Math.round((boss ? 200 : 80) * this.player.stats.goldMul);
+    this.addGold(Math.round((boss ? 200 : 80) * this.player.stats.goldMul));
     this.xp += (boss ? this.nextXp * 1.5 : this.nextXp * 0.6) * this.player.stats.xpMul;
     this.hud.banner(boss ? '보물 寶物' : '보상 報償', '#9affc0', 48, 1400);
     while (this.xp >= this.nextXp) {
@@ -644,38 +776,50 @@ export class Run {
   private cardView(c: Choice): CardView {
     if (c.kind === 'newWeapon') {
       const d = WEAPON_DEFS[c.id];
-      return { title: d.name, hanja: d.hanja, desc: d.desc, tag: '무기 · 신규', accent: '#e8c667' };
+      return { title: d.name, hanja: d.hanja, desc: d.desc, tag: '무기 · 신규', accent: '#e8c667', symbol: d.hanja[0], badge: '신규' };
     }
     if (c.kind === 'upWeapon') {
       const d = WEAPON_DEFS[c.id];
       const w = this.weapons.find((x) => x.id === c.id)!;
-      return { title: d.name, hanja: d.hanja, desc: d.desc, tag: `무기 강화 Lv${w.level}→${w.level + 1}`, accent: '#e8a94a' };
+      const willMax = w.level + 1 >= 8;
+      return {
+        title: d.name,
+        hanja: d.hanja,
+        desc: d.desc,
+        tag: `무기 강화 Lv${w.level}→${w.level + 1}`,
+        accent: '#e8a94a',
+        symbol: d.hanja[0],
+        badge: willMax ? '최대' : '강화',
+        rare: willMax, // Lv8 도달 → 진화 조건 근접 강조
+      };
     }
     if (c.kind === 'newPassive') {
       const d = PASSIVE_BY_ID[c.id];
-      return { title: d.name, hanja: d.hanja, desc: d.desc(1), tag: '패시브 · 신규', accent: '#7ec8ff' };
+      return { title: d.name, hanja: d.hanja, desc: d.desc(1), tag: '패시브 · 신규', accent: '#7ec8ff', symbol: d.hanja[0], badge: '신규', rare: d.rare };
     }
     if (c.kind === 'upPassive') {
       const d = PASSIVE_BY_ID[c.id];
       const lvl = this.passives[c.id];
-      return { title: d.name, hanja: d.hanja, desc: d.desc(lvl + 1), tag: `패시브 Lv${lvl}→${lvl + 1}`, accent: '#7ec8ff' };
+      return { title: d.name, hanja: d.hanja, desc: d.desc(lvl + 1), tag: `패시브 Lv${lvl}→${lvl + 1}`, accent: '#7ec8ff', symbol: d.hanja[0], badge: '강화', rare: d.rare };
     }
     // reward
     const map = {
-      heal: { title: '재정비', hanja: '再整備', desc: '체력 50% 회복' },
-      gold: { title: '군자금', hanja: '軍資金', desc: '골드 +200' },
-      xp: { title: '병법 수련', hanja: '兵法修鍊', desc: '경험치 대량 획득' },
+      heal: { title: '재정비', hanja: '再整備', desc: '체력 50% 회복', symbol: '治' },
+      gold: { title: '군자금', hanja: '軍資金', desc: '골드 +200', symbol: '金' },
+      xp: { title: '병법 수련', hanja: '兵法修鍊', desc: '경험치 대량 획득', symbol: '書' },
     };
     const m = map[c.id];
-    return { title: m.title, hanja: m.hanja, desc: m.desc, tag: '보상', accent: '#9affc0' };
+    return { title: m.title, hanja: m.hanja, desc: m.desc, tag: '보상', accent: '#9affc0', symbol: m.symbol, badge: '보상' };
   }
 
   private pickCard(index: number): void {
     if (!this.levelup.active && this.state !== 'levelup') return;
     const c = this.curChoices[index];
     if (!c) return;
+    audio.sfx('cardSelect');
     this.applyChoice(c);
     this.levelup.close();
+    this.refreshLoadout();
     this.showNextLevelUp();
   }
 
@@ -693,52 +837,71 @@ export class Run {
       this.player.recomputeStats(this.passives);
     } else {
       if (c.id === 'heal') this.player.heal(this.player.maxHp * 0.5);
-      else if (c.id === 'gold') this.gold += 200;
+      else if (c.id === 'gold') this.gold += 200; // 런 내 리롤용(메타 적립 아님)
       else this.xp += this.nextXp * 0.9 * this.player.stats.xpMul;
     }
   }
 
-  private togglePause(): void {
-    if (this.state === 'play') {
-      this.state = 'paused';
-      this.overlay.innerHTML =
-        '<div style="color:#e8c667;font-size:30px;letter-spacing:6px;">일시정지 一時停止</div>' +
-        '<div style="color:#b8bcc8;font-size:15px;">Esc / P 로 계속</div>';
-      this.overlay.style.display = 'flex';
-    } else if (this.state === 'paused') {
-      this.state = 'play';
-      this.overlay.style.display = 'none';
+  // 사망 처리: 부활 가능하면 부활, 아니면 결과 방출.
+  private onPlayerDeath(): void {
+    if (this.reviveAvailable && !this.reviveUsed) {
+      this.reviveUsed = true;
+      this.player.revive(0.5, 2.0);
+      this.effects.spawnRing(this.player.x, this.player.z, 24, 2.4, 1.8, 0.8, 0.7);
+      this.shockwave(this.player.x, this.player.z, 26, 600 * this.player.stats.damageMul);
+      this.rig.addTrauma(0.7);
+      this.flashScreen(0.45);
+      this.hud.banner('起死回生', '#9affc0', 60, 1600);
+      audio.sfx('revive');
+      return;
+    }
+    this.finish(false);
+  }
+
+  // 부활 충격파: 주변 적에게 대미지 + 넉백.
+  private shockwave(cx: number, cz: number, radius: number, damage: number): void {
+    const en = this.enemies;
+    const n = this.hash.query(cx, cz, radius, this.scratch);
+    for (let c = 0; c < n; c++) {
+      const j = this.scratch[c];
+      if (en.alive[j] === 0) continue;
+      const dx = en.x[j] - cx;
+      const dz = en.z[j] - cz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > radius * radius) continue;
+      const d = Math.sqrt(d2) || 1;
+      en.push(j, dx / d, dz / d, 10);
+      if (en.damageAt(j, damage)) this.handleKill(j);
     }
   }
 
-  private enterDead(): void {
-    this.state = 'dead';
-    this.flashDamage(0.9, 600);
-    this.rig.addTrauma(0.8);
-    this.overlay.innerHTML =
-      '<div style="color:#e85c4a;font-size:64px;letter-spacing:10px;text-shadow:0 0 20px rgba(232,92,74,0.6);">戰死</div>' +
-      '<div style="color:#f0e4c0;font-size:22px;letter-spacing:3px;">전사</div>' +
-      `<div style="color:#c9cdda;font-size:17px;margin-top:8px;">${this.statLine()}</div>` +
-      '<div style="color:#8a8f9c;font-size:15px;margin-top:14px;">R 키로 재시작</div>';
-    this.overlay.style.display = 'flex';
-  }
-
-  private enterVictory(): void {
-    this.state = 'victory';
-    this.rig.addTrauma(0.5);
-    this.overlay.innerHTML =
-      '<div style="color:#ffe9a8;font-size:60px;letter-spacing:12px;text-shadow:0 0 24px rgba(255,233,168,0.7);">天下統一</div>' +
-      '<div style="color:#f0e4c0;font-size:24px;letter-spacing:4px;">천하통일</div>' +
-      `<div style="color:#c9cdda;font-size:17px;margin-top:10px;">${this.statLine()}</div>` +
-      '<div style="color:#8a8f9c;font-size:15px;margin-top:14px;">R 키로 재시작</div>';
-    this.overlay.style.display = 'flex';
-  }
-
-  private statLine(): string {
-    const mm = Math.floor(this.gameTime / 60);
-    const ss = Math.floor(this.gameTime % 60);
-    const time = `${mm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}`;
-    return `생존 ${time} · 처치 ${this.kills} · Lv ${this.level} · 골드 ${Math.floor(this.gold)}`;
+  // 런 종료: 결과 계산 후 App으로 방출. 중복 방지.
+  private finish(victory: boolean): void {
+    if (this.ended) return;
+    this.ended = true;
+    this.state = victory ? 'victory' : 'dead';
+    if (victory) {
+      this.rig.addTrauma(0.5);
+    } else {
+      this.flashDamage(0.9, 600);
+      this.rig.addTrauma(0.8);
+    }
+    this.hud.setVisible(false);
+    const comboBonus = Math.floor(this.maxCombo);
+    const result: RunResult = {
+      victory,
+      heroId: this.hero.id,
+      time: this.gameTime,
+      kills: this.kills,
+      maxCombo: this.maxCombo,
+      level: this.level,
+      goldEarned: Math.floor(this.goldEarned) + comboBonus,
+      comboBonus,
+      weapons: this.weapons.map((w) => ({ id: w.id, level: w.level })),
+      passives: Object.keys(this.passives).map((id) => ({ id, level: this.passives[id] })),
+      bosses: Array.from(this.bossesKilled),
+    };
+    this.hooks.onEnd(result);
   }
 
   // === 테스트 훅 (main.ts에서 window.__GAME_TEST__로 노출) ===
@@ -756,11 +919,20 @@ export class Run {
       nw.level = 8;
       this.weapons.push(nw);
     }
+    this.refreshLoadout();
   }
   testGivePassive(id: string, level = 5): void {
     if (!PASSIVE_BY_ID[id]) return;
     this.passives[id] = Math.min(PASSIVE_BY_ID[id].maxLevel, level);
     this.player.recomputeStats(this.passives);
+    this.refreshLoadout();
+  }
+  // 사망 유도 (봇 테스트): 즉시 HP 0 → 다음 update에서 사망/부활 처리.
+  testKillPlayer(): void {
+    this.player.invuln = 0;
+    this.player.musouInvuln = false;
+    this.reviveAvailable = false; // 테스트는 즉시 사망까지 유도
+    this.player.takeDamage(999999);
   }
   testForceLevel(): void {
     this.xp += this.nextXp;
@@ -791,6 +963,10 @@ export class Run {
       time: this.gameTime,
       kills: this.kills,
       level: this.level,
+      gold: Math.floor(this.gold),
+      goldEarned: Math.floor(this.goldEarned),
+      maxCombo: this.maxCombo,
+      hero: this.hero.id,
       alive: this.enemies.aliveCount,
       weapons: this.weapons.map((w) => `${w.id}:${w.level}`),
       passives: { ...this.passives },

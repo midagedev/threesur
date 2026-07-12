@@ -14,12 +14,17 @@ export class Musou {
   private stormAngle = 0;
   private dashIdx = 0;
   private dashTimer = 0;
-  private readonly heroMusou: string;
+  private heroMusou: string;
   private readonly onActivateFx: () => void; // 발동 연출(한자/사운드)
 
   constructor(heroMusou: string, onActivateFx: () => void) {
     this.heroMusou = heroMusou;
     this.onActivateFx = onActivateFx;
+  }
+
+  // 장수 교체 시 무쌍 종류 갱신(선택 화면).
+  setHero(musouKey: string): void {
+    this.heroMusou = musouKey;
   }
 
   reset(): void {

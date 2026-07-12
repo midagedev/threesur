@@ -5,6 +5,15 @@ import { Input } from './core/input';
 import { Loop } from './core/loop';
 import { loadAtlas } from './gfx/atlas';
 import { Run } from './game/run';
+import type { RunResult } from './game/run';
+import { Screens } from './ui/screens';
+import { Joystick, isTouchDevice } from './ui/joystick';
+import { audio } from './core/audio';
+import { loadSave, writeSave, updateBest } from './core/save';
+import type { SaveData } from './core/save';
+import { computeMeta, UPGRADE_BY_ID, upgradeCost, LVBU_UNLOCK_COST } from './data/upgrades';
+
+type Scene = 'title' | 'select' | 'run' | 'result' | 'shop' | 'pause';
 
 const app = document.getElementById('app')!;
 
@@ -19,12 +28,134 @@ document.body.appendChild(loading);
 const renderer = createRenderer(app);
 const rig = new CameraRig();
 const input = new Input();
+const touch = isTouchDevice();
 
-// Phase 1 씬 상태머신: 로딩 완료 후 바로 Run 시작 (Phase 3에서 타이틀/선택 화면 추가).
 loadAtlas()
   .then((atlas) => {
-    const run = new Run(atlas, rig, input);
+    const save: SaveData = loadSave();
+    audio.setMuted(save.muted);
+
+    let scene: Scene = 'title';
+    let lastHero = 'zhaoyun';
+    let lastResult: RunResult | null = null;
+
+    const run = new Run(
+      atlas,
+      rig,
+      input,
+      {
+        onEnd: (result) => onRunEnd(result),
+        onPause: () => onPause(),
+      },
+      touch,
+    );
     const pipeline = new RenderPipeline(renderer, run.scene, rig.camera);
+    const joystick = new Joystick(input);
+
+    const screens = new Screens({
+      onStart: () => goSelect(),
+      onSelectHero: (id) => startRun(id),
+      onOpenShop: (tab) => goShop(tab),
+      onBackToTitle: () => goTitle(),
+      onRetry: () => startRun(lastResult?.heroId ?? lastHero),
+      onBuyUpgrade: (id) => buyUpgrade(id),
+      onUnlockLvbu: () => unlockLvbu(),
+      onToggleMute: () => {
+        save.muted = audio.toggleMuted();
+        writeSave(save);
+        return save.muted;
+      },
+      onResume: () => resumeRun(),
+      onAbandon: () => run.abandon(),
+    });
+    screens.setMuted(save.muted);
+
+    // === 씬 전환 ===
+    function goTitle(): void {
+      scene = 'title';
+      run.enterAttract();
+      joystick.setVisible(false);
+      audio.playBgm('title');
+      screens.showTitle();
+    }
+    function goSelect(): void {
+      scene = 'select';
+      audio.playBgm('title');
+      screens.showSelect(save);
+    }
+    function goShop(tab: 'upgrade' | 'codex'): void {
+      scene = 'shop';
+      audio.playBgm('title');
+      screens.showShop(save, tab);
+    }
+    function startRun(heroId: string): void {
+      lastHero = heroId;
+      scene = 'run';
+      screens.hide();
+      run.beginRun(heroId, computeMeta(save.upgrades));
+      joystick.setVisible(touch);
+    }
+    function onRunEnd(result: RunResult): void {
+      scene = 'result';
+      lastResult = result;
+      joystick.setVisible(false);
+      // 골드 적립 + 최고기록 + 보스 도감 저장
+      save.gold += result.goldEarned;
+      const records = updateBest(save.best, {
+        time: result.time,
+        kills: result.kills,
+        level: result.level,
+        combo: result.maxCombo,
+      });
+      for (const b of result.bosses) if (!save.bosses.includes(b)) save.bosses.push(b);
+      writeSave(save);
+      audio.playJingle(result.victory ? 'victory' : 'defeat');
+      screens.showResult(result, save, records);
+    }
+    function onPause(): void {
+      scene = 'pause';
+      joystick.setVisible(false);
+      screens.showPause();
+    }
+    function resumeRun(): void {
+      scene = 'run';
+      screens.hide();
+      run.resume();
+      joystick.setVisible(touch);
+    }
+    function buyUpgrade(id: string): void {
+      const def = UPGRADE_BY_ID[id];
+      if (!def) return;
+      const lv = save.upgrades[id] ?? 0;
+      const cost = upgradeCost(def, lv);
+      if (cost < 0 || save.gold < cost) return;
+      save.gold -= cost;
+      save.upgrades[id] = lv + 1;
+      writeSave(save);
+      audio.sfx('uiClick');
+      screens.rerenderShop();
+    }
+    function unlockLvbu(): void {
+      if (save.lvbuUnlocked || save.gold < LVBU_UNLOCK_COST) return;
+      save.gold -= LVBU_UNLOCK_COST;
+      save.lvbuUnlocked = true;
+      writeSave(save);
+      audio.sfx('revive');
+      screens.rerenderShop();
+    }
+
+    // 첫 유저 제스처에서 오디오 컨텍스트 활성 (브라우저 자동재생 정책).
+    const wakeAudio = (): void => {
+      audio.init();
+      audio.playBgm(scene === 'run' ? 'battle' : 'title');
+    };
+    window.addEventListener('pointerdown', wakeAudio, { once: true });
+    window.addEventListener('keydown', wakeAudio, { once: true });
+
+    // Esc: 일시정지 화면에서 계속 (run 시뮬레이션은 정지 중이라 App이 처리).
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Escape' && scene === 'pause') resumeRun();
+    });
 
     window.addEventListener('resize', () => {
       const w = window.innerWidth;
@@ -33,11 +164,49 @@ loadAtlas()
       pipeline.setSize(w, h);
     });
 
-    run.start();
+    // 부팅: 어트랙트 배경 + 타이틀. (오디오는 첫 제스처에서 활성 → 타이틀 BGM 예약)
+    run.enterAttract();
+    audio.playBgm('title');
+    screens.showTitle(true);
     loading.remove();
 
-    // 테스트 훅 (playtest 봇에서 시간 스킵/무기 지급/무쌍 발동 등 장면 연출)
+    // 드로우콜 프레임 단위 측정
+    renderer.info.autoReset = false;
+    let fpsEma = 60;
+    const loop = new Loop((dt) => {
+      input.poll();
+      run.update(dt);
+      if (scene === 'run') joystick.setMusou(run.musouGauge, run.musouReadyFlag);
+      pipeline.setMusou(run.musouStrength, run.renderTime);
+      renderer.info.reset();
+      pipeline.render();
+      input.endFrame();
+      audio.endFrame();
+      if (dt > 0) fpsEma += (1 / dt - fpsEma) * 0.05;
+    });
+    loop.start();
+
+    // === 테스트 훅 (playtest 봇) ===
     (window as unknown as { __GAME_TEST__: unknown }).__GAME_TEST__ = {
+      // 씬 제어
+      goToTitle: () => goTitle(),
+      selectHero: (id: string) => startRun(id),
+      openShop: (tab: 'upgrade' | 'codex' = 'upgrade') => goShop(tab),
+      grantGold: (n: number) => {
+        save.gold += n;
+        writeSave(save);
+        screens.rerenderShop();
+      },
+      buyUpgrade: (id: string) => buyUpgrade(id),
+      unlockLvbu: () => unlockLvbu(),
+      killPlayer: () => run.testKillPlayer(),
+      get scene() {
+        return scene;
+      },
+      get save() {
+        return { gold: save.gold, upgrades: { ...save.upgrades }, lvbuUnlocked: save.lvbuUnlocked, best: { ...save.best }, bosses: [...save.bosses] };
+      },
+      // 런 제어 (기존 유지)
       setTime: (s: number) => run.testSetTime(s),
       giveWeapon: (id: string) => run.testGiveWeapon(id),
       givePassive: (id: string, lv?: number) => run.testGivePassive(id, lv),
@@ -52,20 +221,6 @@ loadAtlas()
         return run.testStats;
       },
     };
-
-    // 드로우콜을 프레임 단위로 누적 측정(컴포저 다중 패스 합산)
-    renderer.info.autoReset = false;
-    let fpsEma = 60;
-    const loop = new Loop((dt) => {
-      input.poll();
-      run.update(dt);
-      pipeline.setMusou(run.musouStrength, run.renderTime);
-      renderer.info.reset();
-      pipeline.render();
-      input.endFrame();
-      if (dt > 0) fpsEma += (1 / dt - fpsEma) * 0.05;
-    });
-    loop.start();
 
     // 성능/디버그 계측 훅
     (window as unknown as { __DEBUG__: unknown }).__DEBUG__ = {

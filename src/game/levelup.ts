@@ -6,6 +6,9 @@ export interface CardView {
   desc: string; // 효과 설명
   tag: string; // 분류 (무기 신규/강화, 패시브, 진화, 보상)
   accent: string; // 강조색
+  symbol: string; // 심볼 글자(한자 1자) — CSS 원형에 표시
+  badge?: string; // 뱃지 텍스트 (신규/강화/진화)
+  rare?: boolean; // 희귀(진화 가능/희귀 패시브) → 금테
 }
 
 export class LevelUp {
@@ -44,6 +47,7 @@ export class LevelUp {
     for (let i = 0; i < 3; i++) {
       const card = document.createElement('div');
       card.style.cssText = [
+        'position:relative',
         'width:210px',
         'min-height:184px',
         'padding:22px 16px',
@@ -109,13 +113,30 @@ export class LevelUp {
       const c = cards[i];
       if (c) {
         el.style.display = 'flex';
-        el.style.borderColor = c.accent;
+        // 희귀(진화 가능/희귀 패시브)는 금테 + 강한 글로우
+        el.style.borderColor = c.rare ? '#ffe9a8' : c.accent;
+        el.style.boxShadow = c.rare
+          ? '0 0 26px rgba(255,220,120,0.4),inset 0 0 0 1px rgba(255,220,120,0.4)'
+          : '0 0 18px rgba(232,198,103,0.12),inset 0 0 0 1px rgba(232,198,103,0.12)';
+        const badge = c.badge
+          ? `<div style="position:absolute;top:10px;right:10px;font-size:11px;letter-spacing:1px;padding:2px 7px;border-radius:10px;background:${c.accent}22;color:${c.accent};border:1px solid ${c.accent}66;">${c.badge}</div>`
+          : '';
         el.innerHTML =
-          `<div style="color:${c.accent};font-size:12px;letter-spacing:2px;opacity:0.85;">${c.tag}</div>` +
+          badge +
+          `<div style="width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;color:${c.accent};background:radial-gradient(circle at 40% 35%,rgba(255,255,255,0.08),rgba(0,0,0,0.35));border:1.5px solid ${c.accent};box-shadow:0 0 14px ${c.accent}55;">${c.symbol}</div>` +
+          `<div style="color:${c.accent};font-size:11px;letter-spacing:2px;opacity:0.85;">${c.tag}</div>` +
           `<div style="color:#f0e4c0;font-size:20px;letter-spacing:1px;">${c.title}</div>` +
-          `<div style="color:${c.accent};font-size:15px;opacity:0.9;">${c.hanja}</div>` +
+          `<div style="color:${c.accent};font-size:14px;opacity:0.9;">${c.hanja}</div>` +
           `<div style="color:#d8dae2;font-size:14px;line-height:1.4;">${c.desc}</div>` +
-          `<div style="margin-top:auto;color:#5a6070;font-size:24px;">${i + 1}</div>`;
+          `<div style="margin-top:auto;color:#5a6070;font-size:22px;">${i + 1}</div>`;
+        // 순차 슬라이드+스케일 등장
+        el.animate(
+          [
+            { transform: 'translateY(26px) scale(0.9)', opacity: 0 },
+            { transform: 'translateY(0) scale(1)', opacity: 1 },
+          ],
+          { duration: 300, delay: i * 90, easing: 'cubic-bezier(0.2,0.9,0.3,1)', fill: 'backwards' },
+        );
       } else {
         el.style.display = 'none';
       }

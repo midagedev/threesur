@@ -4,6 +4,8 @@ export class Input {
   private pressed = new Set<string>();
   // 이동 축 (재사용 객체, 프레임당 할당 없음)
   readonly move = { x: 0, z: 0 };
+  // 가상 조이스틱 축 (모바일). active면 키보드 대신 이 값을 사용.
+  readonly joy = { x: 0, z: 0, active: false };
 
   constructor(target: EventTarget = window) {
     target.addEventListener('keydown', this.onKeyDown as EventListener);
@@ -38,8 +40,19 @@ export class Input {
     return false;
   }
 
+  // 외부(가상 버튼)에서 엣지 입력 주입. keydown과 동일하게 소비된다.
+  press(code: string): void {
+    this.pressed.add(code);
+  }
+
   // 이동 축 갱신: 화면 기준 위=-Z(북), 아래=+Z(남), 좌=-X(서), 우=+X(동)
+  // 조이스틱이 활성이면 키보드 대신 조이스틱 벡터 사용.
   poll(): void {
+    if (this.joy.active) {
+      this.move.x = this.joy.x;
+      this.move.z = this.joy.z;
+      return;
+    }
     let x = 0;
     let z = 0;
     if (this.down.has('KeyD') || this.down.has('ArrowRight')) x += 1;

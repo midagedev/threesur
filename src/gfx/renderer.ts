@@ -12,9 +12,17 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
+// 모바일은 DPR 1.5로 하향(성능), 데스크톱은 2까지 허용.
+function isMobile(): boolean {
+  return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+}
+function maxDpr(): number {
+  return Math.min(window.devicePixelRatio, isMobile() ? 1.5 : 2);
+}
+
 export function createRenderer(canvasParent: HTMLElement): WebGLRenderer {
   const renderer = new WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(maxDpr());
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
@@ -66,19 +74,22 @@ export class RenderPipeline {
   readonly bloom: UnrealBloomPass;
   readonly musouPass: ShaderPass;
   private readonly renderer: WebGLRenderer;
+  private readonly bloomScale: number;
 
   constructor(renderer: WebGLRenderer, scene: Scene, camera: Camera) {
     this.renderer = renderer;
     this.composer = new EffectComposer(renderer);
-    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.composer.setPixelRatio(maxDpr());
     this.composer.setSize(window.innerWidth, window.innerHeight);
 
     this.composer.addPass(new RenderPass(scene, camera));
 
     // 다수의 애디티브 이펙트가 겹쳐 화면이 날아가지 않도록 임계값을 높이고 강도를 낮춤.
     // (밝은 코어만 블룸을 태워 가독성 유지 — technical-art: 블룸은 디테일의 주원천이 아님)
+    // 모바일은 블룸 해상도 절반으로 낮춰 성능 확보.
+    this.bloomScale = isMobile() ? 0.5 : 1;
     this.bloom = new UnrealBloomPass(
-      new Vector2(window.innerWidth, window.innerHeight),
+      new Vector2(window.innerWidth * this.bloomScale, window.innerHeight * this.bloomScale),
       0.42, // strength
       0.5, // radius
       0.9, // threshold
@@ -98,11 +109,12 @@ export class RenderPipeline {
   }
 
   setSize(w: number, h: number): void {
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const dpr = maxDpr();
+    this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(w, h);
-    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.composer.setPixelRatio(dpr);
     this.composer.setSize(w, h);
-    this.bloom.setSize(w, h);
+    this.bloom.setSize(w * this.bloomScale, h * this.bloomScale);
   }
 
   render(): void {

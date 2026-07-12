@@ -9,7 +9,6 @@ import {
   CanvasTexture,
   DynamicDrawUsage,
   DoubleSide,
-  AdditiveBlending,
   Vector2,
   Vector3,
   Color,
@@ -55,16 +54,37 @@ const VERT_INSTANCED = /* glsl */ `
   attribute vec3 aTint;
   uniform vec2 uCellUv;
   varying vec2 vUv;
+  varying vec2 vCellLo;
   varying float vFlash;
   varying vec3 vTint;
   ${FOG_PARS_V}
   void main() {
     vUv = aUvOffset + uv * uCellUv;
+    vCellLo = aUvOffset;
     vFlash = aFlash;
     vTint = aTint;
     vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
     vFogDepth = -mv.z;
     gl_Position = projectionMatrix * mv;
+  }
+`;
+
+// 셀 내부 4-이웃 알파를 샘플해 실루엣 가장자리 픽셀을 감지(디매팅 프린지 정리용).
+// 셀 경계 밖은 투명으로 간주 → 콘텐츠 외곽선이 정확히 잡힘.
+const EDGE_GLSL = /* glsl */ `
+  uniform vec2 uTexel;   // (1/texW, 1/texH)
+  uniform vec2 uCellUv;  // 셀 UV 크기
+  float nbTrans(vec2 uv, vec2 lo, vec2 hi) {
+    if (uv.x < lo.x || uv.y < lo.y || uv.x > hi.x || uv.y > hi.y) return 1.0;
+    return texture2D(uMap, uv).a < 0.5 ? 1.0 : 0.0;
+  }
+  float edgeFactor(vec2 uv, vec2 cellLo) {
+    vec2 hi = cellLo + uCellUv;
+    float e = nbTrans(uv + vec2(uTexel.x, 0.0), cellLo, hi);
+    e = max(e, nbTrans(uv - vec2(uTexel.x, 0.0), cellLo, hi));
+    e = max(e, nbTrans(uv + vec2(0.0, uTexel.y), cellLo, hi));
+    e = max(e, nbTrans(uv - vec2(0.0, uTexel.y), cellLo, hi));
+    return e;
   }
 `;
 
@@ -85,13 +105,17 @@ const VERT_SINGLE = /* glsl */ `
 const FRAG_INSTANCED = /* glsl */ `
   uniform sampler2D uMap;
   varying vec2 vUv;
+  varying vec2 vCellLo;
   varying float vFlash;
   varying vec3 vTint;
+  ${EDGE_GLSL}
   ${FOG_PARS_F}
   void main() {
     vec4 tex = texture2D(uMap, vUv);
     if (tex.a < 0.5) discard;
     vec3 col = pow(tex.rgb, vec3(2.2)) * vTint * ${AMBIENT_LIFT.toFixed(3)};
+    // 디매팅 프린지 → 어두운 아웃라인으로 눌러 밝은 테두리 제거
+    col *= mix(1.0, 0.32, edgeFactor(vUv, vCellLo));
     col = mix(col, vec3(2.0), vFlash); // 피격 화이트 플래시(HDR로 블룸)
     float fog = 1.0 - exp(-uFogDensity * uFogDensity * vFogDepth * vFogDepth);
     col = mix(col, uFogColor, clamp(fog, 0.0, 1.0));
@@ -101,16 +125,22 @@ const FRAG_INSTANCED = /* glsl */ `
 
 const FRAG_SINGLE = /* glsl */ `
   uniform sampler2D uMap;
+  uniform vec2 uUvOffset;
   uniform float uFlash;
   uniform vec3 uTint;
-  uniform float uPlayer; // 1이면 플레이어 밝기 강화
+  uniform float uPlayer; // 1이면 플레이어(림 글로우) / 0이면 다크 아웃라인
   varying vec2 vUv;
+  ${EDGE_GLSL}
   ${FOG_PARS_F}
   void main() {
     vec4 tex = texture2D(uMap, vUv);
     if (tex.a < 0.5) discard;
-    float lift = ${AMBIENT_LIFT.toFixed(3)} * mix(1.0, 1.28, uPlayer);
+    float lift = ${AMBIENT_LIFT.toFixed(3)} * mix(1.0, 1.18, uPlayer);
     vec3 col = pow(tex.rgb, vec3(2.2)) * uTint * lift;
+    float edge = edgeFactor(vUv, uUvOffset);
+    // 플레이어: 금색 림(군중 속 구분) / 그 외(보스): 다크 아웃라인
+    vec3 rim = mix(col * 0.32, vec3(1.9, 1.35, 0.55), 0.8);
+    col = mix(col, mix(col * 0.32, rim, uPlayer), edge);
     col = mix(col, vec3(2.0), uFlash);
     float fog = 1.0 - exp(-uFogDensity * uFogDensity * vFogDepth * vFogDepth);
     col = mix(col, uFogColor, clamp(fog, 0.0, 1.0));
@@ -156,6 +186,7 @@ export class InstancedSpriteRenderer {
       uniforms: {
         uMap: { value: sheet.texture },
         uCellUv: { value: new Vector2(sheet.cellUvW, sheet.cellUvH) },
+        uTexel: { value: new Vector2(1 / sheet.texW, 1 / sheet.texH) },
         ...fogUniforms(),
       },
       vertexShader: VERT_INSTANCED,
@@ -222,16 +253,13 @@ export class InstancedSpriteRenderer {
 export class SpriteQuad {
   readonly mesh: Mesh;
   private readonly mat: ShaderMaterial;
-  private halo: Mesh | null = null;
-  private haloMat: ShaderMaterial | null = null;
-  private readonly sheet: SheetInfo;
 
   constructor(sheet: SheetInfo, worldH = SPRITE_WORLD_H) {
-    this.sheet = sheet;
     this.mat = new ShaderMaterial({
       uniforms: {
         uMap: { value: sheet.texture },
         uCellUv: { value: new Vector2(sheet.cellUvW, sheet.cellUvH) },
+        uTexel: { value: new Vector2(1 / sheet.texW, 1 / sheet.texH) },
         uUvOffset: { value: new Vector2(0, 0) },
         uFlash: { value: 0 },
         uTint: { value: new Color(1, 1, 1) },
@@ -250,48 +278,9 @@ export class SpriteQuad {
     this.mesh.renderOrder = 2;
   }
 
-  // 플레이어 강조: 밝기 강화 + 골드 림 헤일로(확대 애디티브 실루엣).
+  // 플레이어 강조: 셰이더 내 금색 림 아웃라인 + 미세 밝기 강화(군중 속 구분).
   setPlayer(on: boolean): void {
     this.mat.uniforms.uPlayer.value = on ? 1 : 0;
-    if (on && !this.halo) {
-      this.haloMat = new ShaderMaterial({
-        uniforms: {
-          uMap: { value: this.sheet.texture },
-          uCellUv: this.mat.uniforms.uCellUv,
-          uUvOffset: this.mat.uniforms.uUvOffset,
-          uColor: { value: new Color(1.15, 0.85, 0.35) },
-        },
-        vertexShader: /* glsl */ `
-          uniform vec2 uCellUv;
-          uniform vec2 uUvOffset;
-          varying vec2 vUv;
-          void main() {
-            vUv = uUvOffset + uv * uCellUv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `,
-        fragmentShader: /* glsl */ `
-          uniform sampler2D uMap;
-          uniform vec3 uColor;
-          varying vec2 vUv;
-          void main() {
-            float a = texture2D(uMap, vUv).a;
-            if (a < 0.5) discard;
-            gl_FragColor = vec4(uColor, 1.0);
-          }
-        `,
-        transparent: true,
-        blending: AdditiveBlending,
-        depthWrite: false,
-        depthTest: false,
-      });
-      this.halo = new Mesh(makeUnitSpriteGeometry(), this.haloMat);
-      this.halo.frustumCulled = false;
-      this.halo.scale.setScalar(1.05); // 부모(mesh) 스케일에 곱해짐
-      this.halo.position.y = 0;
-      this.halo.renderOrder = 1; // 본체보다 먼저 그려 테두리만 남음
-      this.mesh.add(this.halo);
-    }
   }
 
   setUv(u: number, v: number): void {

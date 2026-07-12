@@ -5,6 +5,7 @@ import type { Input } from '../core/input';
 import type { HeroDef } from '../data/heroes';
 import { CELL_W } from '../data/spriteManifest';
 import { PASSIVE_BY_ID } from '../data/passives';
+import type { MetaMods } from '../data/upgrades';
 
 // 무기/이동/피해 계산에 쓰이는 전체 스탯. 패시브 적용으로 갱신.
 export interface PlayerStats {
@@ -34,7 +35,8 @@ export class Player {
   hp: number;
   maxHp: number;
   readonly stats: PlayerStats;
-  readonly hero: HeroDef;
+  hero: HeroDef;
+  private meta: MetaMods | null = null; // 메타 상점 영구 강화 (런 시작 시 세팅)
 
   // 바라보는 방향(단위 벡터). 무기 발사 방향으로 사용.
   faceX = 0;
@@ -48,9 +50,9 @@ export class Player {
   private animTime = 0;
   private moving = false;
 
-  private readonly baseSpeed: number;
-  private readonly baseHp: number;
-  private readonly blockPx: number;
+  private baseSpeed: number;
+  private baseHp: number;
+  private blockPx: number;
   private readonly quad: SpriteQuad;
   private readonly atlas: Atlas;
   private readonly uv = { u: 0, v: 0 };
@@ -91,6 +93,19 @@ export class Player {
     return PLAYER_RADIUS;
   }
 
+  // 장수 교체(선택 화면). 파생 스탯 갱신. 스프라이트 시트는 sgrade 공용.
+  setHero(hero: HeroDef): void {
+    this.hero = hero;
+    this.baseSpeed = hero.baseSpeed;
+    this.baseHp = hero.baseHp;
+    this.blockPx = hero.charIndex * 4 * CELL_W;
+  }
+
+  // 메타 상점 영구 강화 세팅. resetStats에서 base·패시브 위에 곱해진다.
+  setMeta(meta: MetaMods | null): void {
+    this.meta = meta;
+  }
+
   // 스탯을 장수 base로 리셋한 뒤 보유 패시브를 전부 재적용. 누적 드리프트 없음.
   resetStats(passives: Record<string, number>): void {
     const s = this.stats;
@@ -111,6 +126,14 @@ export class Player {
     for (const id in passives) {
       const def = PASSIVE_BY_ID[id];
       if (def) def.apply(s, passives[id]);
+    }
+    // 메타 강화는 base+패시브 위에 곱해진다(누적 드리프트 없음: 매번 base부터 재계산).
+    if (this.meta) {
+      s.damageMul *= this.meta.damageMul;
+      s.maxHpMul *= this.meta.maxHpMul;
+      s.speedMul *= this.meta.speedMul;
+      s.pickupMul *= this.meta.pickupMul;
+      s.cooldownMul *= this.meta.cooldownMul;
     }
   }
 
@@ -185,6 +208,13 @@ export class Player {
 
   heal(amount: number): void {
     this.hp = Math.min(this.maxHp, this.hp + amount);
+  }
+
+  // 기사회생: HP 비율 회복 + 무적 부여. (run이 충격파/사운드 처리)
+  revive(hpFrac: number, invulnSec: number): void {
+    this.hp = this.maxHp * hpFrac;
+    this.invuln = invulnSec;
+    this.flash = 1;
   }
 
   get dead(): boolean {
