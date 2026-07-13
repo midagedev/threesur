@@ -22,6 +22,11 @@ for (const id in NEW_WEAPONS) {
 
 // 무기 공용 헬퍼 -----------------------------------------------------------
 
+// 보스 데미지 스펀지 해소(#40): 보스에 실제로 닿는 유효 딜이 매우 낮다(투사체는 잡몹 군체에 몸빵당해
+// 보스까지 못 감 → 플레이어 중심 근접 광역만 도달, 그것도 사거리 안일 때만). 실측 집중 딜 ~55/s.
+// 30~60s TTK를 위해 보스 피격에 한해 배수를 준다(잡몹 밸런스·표기 HP·명기 페이싱 불변).
+const BOSS_DMG_MULT = 4.5;
+
 // 선분(캡슐) 판정 + 대미지 + 선택적 넉백(플레이어 기준 바깥 방향).
 function capsuleHit(
   ctx: WeaponContext,
@@ -43,8 +48,9 @@ function capsuleHit(
     if (en.alive[j] === 0) continue;
     const hitR = width + en.radius[j];
     if (distToSegmentSq(en.x[j], en.z[j], ax, az, bx, bz) > hitR * hitR) continue;
-    const died = en.damageAt(j, damage);
-    ctx.damageText.spawn(damage, en.x[j], en.scale[j] * 0.7, en.z[j], false);
+    const dealt = en.boss[j] === 1 ? damage * BOSS_DMG_MULT : damage;
+    const died = en.damageAt(j, dealt);
+    ctx.damageText.spawn(dealt, en.x[j], en.scale[j] * 0.7, en.z[j], false);
     if (knockback > 0) {
       const dx = en.x[j] - ctx.px;
       const dz = en.z[j] - ctx.pz;
@@ -70,22 +76,26 @@ function arcHit(
 ): void {
   const en = ctx.enemies;
   const cosHalf = Math.cos(halfAngle);
-  const n = ctx.hash.query(cx, cz, radius + 1.0, ctx.scratch);
+  const n = ctx.hash.query(cx, cz, radius + 21, ctx.scratch); // +21: 보스 확장 사거리(#40) 후보 포함
   for (let c = 0; c < n; c++) {
     const j = ctx.scratch[c];
     if (en.alive[j] === 0) continue;
     const dx = en.x[j] - cx;
     const dz = en.z[j] - cz;
     const d2 = dx * dx + dz * dz;
-    const rr = radius + en.radius[j];
+    const isBoss = en.boss[j] === 1;
+    // 보스 데미지 스펀지 해소(#40): 보스는 사거리 +20 확장 + 부채꼴 각도 무시.
+    // 이동/원거리형 보스가 카이팅해도 스윕이 닿게 하여 패턴 무관 일정한 딜 유입(잡몹 판정은 불변).
+    const rr = (isBoss ? radius + 20 : radius) + en.radius[j];
     if (d2 > rr * rr) continue;
     const d = Math.sqrt(d2) || 1;
-    if (halfAngle < 3.13) {
+    if (halfAngle < 3.13 && !isBoss) {
       const dot = (dx / d) * dirX + (dz / d) * dirZ;
       if (dot < cosHalf) continue;
     }
-    const died = en.damageAt(j, damage);
-    ctx.damageText.spawn(damage, en.x[j], en.scale[j] * 0.7, en.z[j], false);
+    const dealt = en.boss[j] === 1 ? damage * BOSS_DMG_MULT : damage;
+    const died = en.damageAt(j, dealt);
+    ctx.damageText.spawn(dealt, en.x[j], en.scale[j] * 0.7, en.z[j], false);
     if (knockback > 0) {
       en.push(j, dx / d, dz / d, knockback);
       if (knockback >= 5 && !died && ctx.rng.next() < 0.35) ctx.particles.dust(en.x[j], en.z[j]);

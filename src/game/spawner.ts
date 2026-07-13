@@ -118,7 +118,7 @@ export class Spawner {
     }
     // #25 밀도 밸런스: 초반 레이트 완화(2.6→1.7/분) + 상한 25→18로 6분 스파이크 평탄화.
     let rate = Math.min(18, 2 + minute * 1.7); // 초당 스폰 수
-    if (this.bossActive) rate *= 0.6; // 보스 중 소폭 감소
+    if (this.bossActive) rate *= 0.4; // 보스전: 잡몹 스폰 감소(#40, 0.6→0.4) — 오토에임 분산·데미지 스펀지 완화
 
     if (this.pool.aliveCount < ENEMY_SOFT_CAP) {
       this.acc += rate * dt;

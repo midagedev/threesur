@@ -54,9 +54,14 @@ export class SpatialHash {
   }
 }
 
-// (px,pz)에서 maxR 이내 가장 가까운 살아있는 적 인덱스. 없으면 -1.
+// 오토에임 대상 선택: (px,pz)에서 maxR 이내 최근접 적. 없으면 -1.
+// #40 보스 가중치: 사거리 내 보스가 있으면 조준 duty의 일부 구간을 보스에 배분한다.
+// 잡몹은 항상 플레이어에 밀착(접촉거리)이라 순수 거리 스코어로는 원거리 유지형 보스가 영영 조준 밖 →
+// 투사체가 보스에 닿지 못해 데미지 스펀지가 됨. 전량 락온은 잡몹 과밀 유발(과보정)이므로,
+// 발사 시각의 일부(≈42%)만 보스로 향하게 하여 "유효 히트 일부가 보스로" 간다. (enemies.boss는 run이 전달하는 풀에 존재)
+let aimFrame = 0;
 export function findNearestEnemy(
-  enemies: { alive: Uint8Array; x: Float32Array; z: Float32Array },
+  enemies: { alive: Uint8Array; x: Float32Array; z: Float32Array; boss?: Uint8Array },
   hash: SpatialHash,
   px: number,
   pz: number,
@@ -66,6 +71,9 @@ export function findNearestEnemy(
   const n = hash.query(px, pz, maxR, scratch);
   let best = -1;
   let bestD = maxR * maxR;
+  let bossBest = -1;
+  let bossBestD = maxR * maxR;
+  const bossArr = enemies.boss;
   for (let c = 0; c < n; c++) {
     const j = scratch[c];
     if (enemies.alive[j] === 0) continue;
@@ -76,6 +84,18 @@ export function findNearestEnemy(
       bestD = d2;
       best = j;
     }
+    if (bossArr !== undefined && bossArr[j] === 1 && d2 < bossBestD) {
+      bossBestD = d2;
+      bossBest = j;
+    }
+  }
+  // 보스 조준 duty (프레임 기준 → fps 무관하게 발사 시각의 일정 비율이 보스로 향함).
+  // 밀집 전장에선 최근접이 항상 잡몹이라 보스가 조준 밖 → 이 duty로 조준의 일부를 보스에 고정.
+  aimFrame++;
+  if (bossBest >= 0) {
+    const PERIOD = 200;
+    const BOSS_WINDOW = 90; // 200프레임 중 90 ≈ 45%가 보스 조준(투사체·근접 모두)
+    if (aimFrame % PERIOD < BOSS_WINDOW) return bossBest;
   }
   return best;
 }

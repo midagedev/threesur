@@ -33,21 +33,21 @@ interface BossDef {
 // 3분/6분/9분 슬롯 + 무한 미니보스. 전부 스프라이트 보유(sgrade/apriority manifest charIndex).
 export const BOSS_DEFS: Record<string, BossDef> = {
   // 3분 슬롯 (랜덤 1)
-  yuanshao: { name: '원소', hanja: '袁紹', charIndex: 14, sheet: SHEET_SGRADE, pattern: 'fan', hp: 8000, speed: 2.5, contact: 14, radius: 1.4, tr: 1.1, tg: 1.1, tb: 1.4 },
-  xiahoudun: { name: '하후돈', hanja: '夏侯惇', charIndex: 14, sheet: SHEET_APRIORITY, pattern: 'dash', hp: 9000, speed: 2.9, contact: 16, radius: 1.45, tr: 1.5, tg: 0.85, tb: 0.8 },
-  sunce: { name: '손책', hanja: '孫策', charIndex: 12, sheet: SHEET_SGRADE, pattern: 'rush', hp: 8500, speed: 3.3, contact: 15, radius: 1.35, tr: 1.0, tg: 1.2, tb: 1.5 },
+  yuanshao: { name: '원소', hanja: '袁紹', charIndex: 14, sheet: SHEET_SGRADE, pattern: 'fan', hp: 4200, speed: 2.5, contact: 14, radius: 1.4, tr: 1.1, tg: 1.1, tb: 1.4 },
+  xiahoudun: { name: '하후돈', hanja: '夏侯惇', charIndex: 14, sheet: SHEET_APRIORITY, pattern: 'dash', hp: 4200, speed: 2.9, contact: 16, radius: 1.45, tr: 1.5, tg: 0.85, tb: 0.8 },
+  sunce: { name: '손책', hanja: '孫策', charIndex: 12, sheet: SHEET_SGRADE, pattern: 'rush', hp: 4000, speed: 3.3, contact: 15, radius: 1.35, tr: 1.0, tg: 1.2, tb: 1.5 },
   // 6분 슬롯 (랜덤 1)
-  dongzhuo: { name: '동탁', hanja: '董卓', charIndex: 4, sheet: SHEET_SGRADE, pattern: 'firezone', hp: 22000, speed: 2.1, contact: 18, radius: 1.6, tr: 1.4, tg: 1.0, tb: 0.9 },
-  simayi: { name: '사마의', hanja: '司馬懿', charIndex: 11, sheet: SHEET_SGRADE, pattern: 'delaybolt', hp: 20000, speed: 2.3, contact: 16, radius: 1.5, tr: 0.9, tg: 1.05, tb: 1.5 },
-  zhouyu: { name: '주유', hanja: '周瑜', charIndex: 18, sheet: SHEET_SGRADE, pattern: 'firezone', hp: 21000, speed: 2.4, contact: 16, radius: 1.5, tr: 2.0, tg: 1.0, tb: 0.45 },
+  dongzhuo: { name: '동탁', hanja: '董卓', charIndex: 4, sheet: SHEET_SGRADE, pattern: 'firezone', hp: 4500, speed: 2.1, contact: 18, radius: 1.6, tr: 1.4, tg: 1.0, tb: 0.9 },
+  simayi: { name: '사마의', hanja: '司馬懿', charIndex: 11, sheet: SHEET_SGRADE, pattern: 'delaybolt', hp: 5200, speed: 2.3, contact: 16, radius: 1.5, tr: 0.9, tg: 1.05, tb: 1.5 },
+  zhouyu: { name: '주유', hanja: '周瑜', charIndex: 18, sheet: SHEET_SGRADE, pattern: 'firezone', hp: 4500, speed: 2.4, contact: 16, radius: 1.5, tr: 2.0, tg: 1.0, tb: 0.45 },
   // 9분 고정 최종
-  lvbu: { name: '여포', hanja: '呂布', charIndex: 10, sheet: SHEET_SGRADE, pattern: 'lvbu', hp: 46000, speed: 2.7, contact: 20, radius: 1.5, tr: 1.5, tg: 0.9, tb: 1.1 },
+  lvbu: { name: '여포', hanja: '呂布', charIndex: 10, sheet: SHEET_SGRADE, pattern: 'lvbu', hp: 3600, speed: 2.7, contact: 20, radius: 1.5, tr: 1.5, tg: 0.9, tb: 1.1 },
   // 무한 미니보스 (12분+ 순환, 스케일링)
-  dianwei: { name: '전위', hanja: '典韋', charIndex: 6, sheet: SHEET_APRIORITY, pattern: 'dash', hp: 14000, speed: 2.8, contact: 17, radius: 1.4, tr: 1.4, tg: 1.1, tb: 0.9 },
-  gaoshun: { name: '고순', hanja: '高順', charIndex: 8, sheet: SHEET_APRIORITY, pattern: 'fan', hp: 13000, speed: 2.5, contact: 15, radius: 1.35, tr: 1.2, tg: 1.15, tb: 1.0 },
-  xiahouyuan: { name: '하후연', hanja: '夏侯淵', charIndex: 15, sheet: SHEET_APRIORITY, pattern: 'delaybolt', hp: 13500, speed: 2.6, contact: 15, radius: 1.4, tr: 1.45, tg: 0.95, tb: 0.85 },
-  lumeng: { name: '여몽', hanja: '呂蒙', charIndex: 8, sheet: SHEET_SGRADE, pattern: 'firezone', hp: 14000, speed: 2.5, contact: 16, radius: 1.45, tr: 0.95, tg: 1.3, tb: 1.05 },
-  luxun: { name: '육손', hanja: '陸遜', charIndex: 9, sheet: SHEET_SGRADE, pattern: 'fan', hp: 13500, speed: 2.5, contact: 15, radius: 1.4, tr: 2.0, tg: 1.05, tb: 0.5 },
+  dianwei: { name: '전위', hanja: '典韋', charIndex: 6, sheet: SHEET_APRIORITY, pattern: 'dash', hp: 5000, speed: 2.8, contact: 17, radius: 1.4, tr: 1.4, tg: 1.1, tb: 0.9 },
+  gaoshun: { name: '고순', hanja: '高順', charIndex: 8, sheet: SHEET_APRIORITY, pattern: 'fan', hp: 5000, speed: 2.5, contact: 15, radius: 1.35, tr: 1.2, tg: 1.15, tb: 1.0 },
+  xiahouyuan: { name: '하후연', hanja: '夏侯淵', charIndex: 15, sheet: SHEET_APRIORITY, pattern: 'delaybolt', hp: 5000, speed: 2.6, contact: 15, radius: 1.4, tr: 1.45, tg: 0.95, tb: 0.85 },
+  lumeng: { name: '여몽', hanja: '呂蒙', charIndex: 8, sheet: SHEET_SGRADE, pattern: 'firezone', hp: 5000, speed: 2.5, contact: 16, radius: 1.45, tr: 0.95, tg: 1.3, tb: 1.05 },
+  luxun: { name: '육손', hanja: '陸遜', charIndex: 9, sheet: SHEET_SGRADE, pattern: 'fan', hp: 5000, speed: 2.5, contact: 15, radius: 1.4, tr: 2.0, tg: 1.05, tb: 0.5 },
 };
 
 // 무한 모드 미니보스 순환 순서.
@@ -356,12 +356,12 @@ export class Boss {
         enemyProj.spawn(en.x[i], en.z[i], Math.cos(a), Math.sin(a), 13, 14, false, EK_LIGHTNING);
       }
     }
-    // 졸개 소환
+    // 졸개 소환 (#40: 5/7s→3/11s — 누적 스웜이 여포 딜 유입을 막고 플레이어를 과부하시킴)
     if (this.atk3 <= 0) {
-      this.atk3 = 7.0;
+      this.atk3 = 11.0;
       const t = ENEMY_TYPES.general_blade;
       const bpx = this.atlas.soldierBlockPx(t.charIndex);
-      for (let k = 0; k < 5; k++) {
+      for (let k = 0; k < 3; k++) {
         const a = ctx.rng.next() * Math.PI * 2;
         const r = 3 + ctx.rng.range(0, 3);
         en.spawn(px + Math.cos(a) * r, pz + Math.sin(a) * r, t.hp * 2, t.speed, t.radius, t.damage, t.gemValue, t.worldScale, 0, bpx, 0);
