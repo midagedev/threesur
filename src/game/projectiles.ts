@@ -174,7 +174,8 @@ export class ProjectilePool {
 
     this.spriteBatches = [
       new RetroProjectileBatch(scene, 'player-arrow-basic', CAP),
-      new RetroProjectileBatch(scene, 'talisman', CAP),
+      new RetroProjectileBatch(scene, 'talisman', CAP, 5, 1, true), // 팔랑이는 부적
+
       new RetroProjectileBatch(scene, 'slash-wave', CAP),
       new RetroProjectileBatch(scene, 'bagua-orb', CAP),
       new RetroProjectileBatch(scene, 'cavalry', CAP),

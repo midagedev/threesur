@@ -9,6 +9,7 @@ import {
   AdditiveBlending,
   Color,
 } from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   ATTACK_GUANDAO,
   ATTACK_HALBERD,
@@ -76,9 +77,13 @@ export class EffectsSystem {
       this.rings.push(this.makeSlot(ringGeo, RING_FRAG, 0.05));
     }
 
-    // 낙뢰 볼트 (세워진 쿼드, 카메라 향함)
-    const boltGeo = new PlaneGeometry(1, 1, 1, 1);
-    boltGeo.translate(0, 0.5, 0);
+    // 낙뢰 볼트: 교차한 세로 쿼드 2장으로 볼류메트릭 3D 지그재그(어느 각도서든 부피감).
+    const boltA = new PlaneGeometry(1, 1, 1, 1);
+    boltA.translate(0, 0.5, 0);
+    const boltB = new PlaneGeometry(1, 1, 1, 1);
+    boltB.rotateY(Math.PI / 2);
+    boltB.translate(0, 0.5, 0);
+    const boltGeo = mergeGeometries([boltA, boltB]);
     for (let i = 0; i < 16; i++) {
       this.bolts.push(this.makeSlot(boltGeo, BOLT_FRAG, 0.16));
     }

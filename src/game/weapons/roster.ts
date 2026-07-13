@@ -347,7 +347,7 @@ export class BamenWeapon extends TimedWeapon {
       const a = base + (k / count) * Math.PI * 2;
       ctx.projectiles.spawn(
         ctx.px, ctx.pz, Math.cos(a), Math.sin(a), speed, d, 0.55, 6, 3.0,
-        PK_TALISMAN, 2.0, 1.4, 2.4, 1.2, 1.0, true, 5,
+        PK_TALISMAN, 1.6, 1.9, 2.4, 1.2, 1.0, true, 5, // 아군 청백 규약(#15)
       );
     }
   }

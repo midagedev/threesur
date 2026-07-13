@@ -43,6 +43,7 @@ export class RetroProjectileBatch {
     capacity: number,
     renderOrder = 5,
     intensity = 1,
+    flutter = false,
   ) {
     const texture = new TextureLoader().load(
       `${import.meta.env.BASE_URL}assets/projectiles/${name}.png`,
@@ -52,7 +53,8 @@ export class RetroProjectileBatch {
     texture.minFilter = NearestFilter;
     texture.generateMipmaps = false;
 
-    const geometry = new PlaneGeometry(1, 1, 1, 1);
+    // 부적: 종이가 팔랑이도록 길이 방향 세그먼트를 준다.
+    const geometry = new PlaneGeometry(1, 1, flutter ? 12 : 1, 1);
     geometry.rotateX(-Math.PI / 2);
     this.fade = new Float32Array(capacity);
     this.fadeAttr = new InstancedBufferAttribute(this.fade, 1);
@@ -67,12 +69,15 @@ export class RetroProjectileBatch {
       },
       vertexShader: /* glsl */ `
         attribute float aFade;
+        uniform float uTime;
         varying vec2 vUv;
         varying float vFade;
         void main() {
           vUv = uv;
           vFade = aFade;
-          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+          vec3 pos = position;
+          ${flutter ? 'pos.y += sin(pos.x * 7.0 + uTime * 13.0) * 0.13 + sin(pos.z * 5.0 - uTime * 9.0) * 0.05;' : ''}
+          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(pos, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
