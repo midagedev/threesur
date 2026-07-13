@@ -75,6 +75,9 @@ export class Boss {
   private readonly boltX = new Float32Array(3);
   private readonly boltZ = new Float32Array(3);
   private boltT = -1;
+  // 그로기(틈) 윈도우 (#40 14.5): 시그니처 패턴 종료 후 숨 고르기 — 근접 처단 창.
+  private groggyT = 0;
+  private groggyCd = 0;
 
   constructor(atlas: Atlas, onWarn: (name: string, hanja: string) => void) {
     this.atlas = atlas;
@@ -121,6 +124,8 @@ export class Boss {
     this.atk3 = 6.0;
     this.dashState = 0;
     this.boltT = -1;
+    this.groggyT = 0;
+    this.groggyCd = 4.0; // 첫 그로기까지 최소 간격
     ctx.effects.spawnRing(px, pz, 24, 2.4, 1.2, 0.6, 0.9);
     // 쇼케이스: 보스 등장 시 light-field 우선 광원 백라이트(테마색) — 등장 위압감을 3D 조명으로.
     // 등장 순간에만 짧게 스미는 테마색 백라이트(일반 광원 → 전투광에 밀려 누적 안 됨).
@@ -139,6 +144,19 @@ export class Boss {
     }
     const i = this.idx;
     const def = this.def!;
+    this.groggyCd -= dt;
+
+    // 그로기(틈): 시그니처 패턴 종료 후 숨 고르기 — 이동/공격 정지 + 슬럼프 틴트, 근접 처단 창.
+    if (this.groggyT > 0) {
+      this.groggyT -= dt;
+      en.groggy[i] = 1;
+      en.tr[i] = 0.55; en.tg[i] = 0.78; en.tb[i] = 1.28; // 회청 슬럼프
+      if (this.groggyT <= 0) {
+        en.groggy[i] = 0;
+        en.tr[i] = def.tr; en.tg[i] = def.tg; en.tb[i] = def.tb; // 틴트 복원
+      }
+      return; // 그로기 중엔 이동/패턴 정지
+    }
 
     let dx = px - en.x[i];
     let dz = pz - en.z[i];
@@ -174,6 +192,19 @@ export class Boss {
     }
   }
 
+  // 시그니처 패턴 종료 → 그로기 진입(재발동 쿨 중이면 무시). 근접 처단 창을 연다.
+  private tryGroggy(ctx: WeaponContext, i: number): void {
+    if (this.groggyCd > 0 || this.groggyT > 0) return;
+    const en = ctx.enemies;
+    const lowHp = en.hp[i] / en.maxHp[i] < 0.25;
+    this.groggyT = lowHp ? 1.2 : 1.8;
+    this.groggyCd = this.groggyT + 5.0; // 지속 + 재발동 간격
+    en.groggy[i] = 1;
+    en.hitPunch[i] = 1; // 스쿼시(스케일 팝)
+    ctx.effects.spawnCrest(en.x[i], en.z[i], '隙', 0.6, 0.85, 1.4, this.groggyT);
+    ctx.particles.dust(en.x[i], en.z[i]);
+  }
+
   // fan: 투사체 부채꼴 + 유도 독탄 (원소/고순/육손). 거리 유지형.
   private updateFan(ctx: WeaponContext, enemyProj: EnemyProjectilePool, i: number, dx: number, dz: number): void {
     const en = ctx.enemies;
@@ -185,6 +216,7 @@ export class Boss {
         enemyProj.spawn(en.x[i], en.z[i], Math.cos(a), Math.sin(a), 10, 12, false, EK_ARROW);
       }
       ctx.effects.spawnRing(en.x[i], en.z[i], 3, 1.4, 1.2, 2.0, 0.4);
+      this.tryGroggy(ctx, i); // 부채꼴 사격 후 틈
     }
     if (this.atk2 <= 0) {
       this.atk2 = 5.2;
@@ -217,6 +249,7 @@ export class Boss {
         ctx.zones.spawn(px + Math.cos(a) * r, pz + Math.sin(a) * r, 3.0, 3.2, 16, 2.6, 0.7, 0.2);
       }
       ctx.effects.spawnRing(en.x[i], en.z[i], 4, 2.4, 1.0, 0.4, 0.5);
+      this.tryGroggy(ctx, i); // 장판 소환 후 틈
     }
     if (this.atk2 <= 0) {
       this.atk2 = 4.6;
@@ -251,6 +284,7 @@ export class Boss {
       if (this.dashT <= 0) {
         this.dashState = 0;
         en.damage[i] = this.def!.contact;
+        this.tryGroggy(ctx, i); // 돌진 종료 후 틈
       }
     }
     if (this.atk1 <= 0 && this.dashState === 0) {
@@ -276,6 +310,7 @@ export class Boss {
       if (this.dashT <= 0) {
         this.dashState = 0;
         en.damage[i] = this.def!.contact;
+        this.tryGroggy(ctx, i); // 돌진 종료 후 틈
       }
     }
     if (this.atk1 <= 0 && this.dashState === 0) {
@@ -316,6 +351,7 @@ export class Boss {
             enemyProj.spawn(this.boltX[k], this.boltZ[k], Math.cos(a), Math.sin(a), 5, 16, false, EK_LIGHTNING);
           }
         }
+        this.tryGroggy(ctx, i); // 낙뢰 강하 후 틈
       }
     }
   }
@@ -340,6 +376,7 @@ export class Boss {
       if (this.dashT <= 0) {
         this.dashState = 0;
         en.damage[i] = this.def!.contact;
+        this.tryGroggy(ctx, i); // 돌진 종료 후 틈
       }
     }
     if (this.atk1 <= 0 && this.dashState === 0) {

@@ -48,7 +48,7 @@ function capsuleHit(
     if (en.alive[j] === 0) continue;
     const hitR = width + en.radius[j];
     if (distToSegmentSq(en.x[j], en.z[j], ax, az, bx, bz) > hitR * hitR) continue;
-    const dealt = en.boss[j] === 1 ? damage * BOSS_DMG_MULT : damage;
+    const dealt = en.boss[j] === 1 ? damage * BOSS_DMG_MULT * (en.groggy[j] === 1 ? 1.6 : 1) : damage;
     const died = en.damageAt(j, dealt);
     ctx.damageText.spawn(dealt, en.x[j], en.scale[j] * 0.7, en.z[j], false);
     if (knockback > 0) {
@@ -93,7 +93,8 @@ function arcHit(
       const dot = (dx / d) * dirX + (dz / d) * dirZ;
       if (dot < cosHalf) continue;
     }
-    const dealt = en.boss[j] === 1 ? damage * BOSS_DMG_MULT : damage;
+    // 그로기 중인 보스는 근접 피해 +60% (#40 14.5)
+    const dealt = isBoss ? damage * BOSS_DMG_MULT * (en.groggy[j] === 1 ? 1.6 : 1) : damage;
     const died = en.damageAt(j, dealt);
     ctx.damageText.spawn(dealt, en.x[j], en.scale[j] * 0.7, en.z[j], false);
     if (knockback > 0) {

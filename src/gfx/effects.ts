@@ -72,6 +72,7 @@ export class EffectsSystem {
   private cCur = 0;
   private readonly flashes: Slot[] = [];
   private fCur = 0;
+  private flashThisFrame = 0; // #40 프레임당 flash 상한 카운터
   private readonly attackSprites: RetroAttackSpriteFx;
 
   // #18 무쌍 스펙터클 프리미티브
@@ -328,6 +329,10 @@ export class EffectsSystem {
 
   // 킬/대시 순간 광점(발광 원반). 짧게 확장하며 페이드.
   spawnFlash(x: number, z: number, r: number, g: number, b: number, radius: number): void {
+    // #40: 한 프레임에 flash 3장 초과 스폰 금지 — 대량 동시 처치 시 킬플래시가 중앙에 누적돼
+    // 화이트아웃(hotFrac↑)되던 것을 상한으로 차단(정상 플레이는 프레임당 <3이라 무영향).
+    if (this.flashThisFrame >= 3) return;
+    this.flashThisFrame++;
     const s = this.flashes[this.fCur];
     this.fCur = (this.fCur + 1) % this.flashes.length;
     s.age = 0;
@@ -462,6 +467,7 @@ export class EffectsSystem {
   }
 
   update(dt: number): void {
+    this.flashThisFrame = 0; // #40: 프레임당 flash 스폰 카운터 리셋(대량 처치 킬플래시 누적 상한)
     this.attackSprites.update(dt);
     this.tickThrust(dt);
     this.tickArc(dt);

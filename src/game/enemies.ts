@@ -78,6 +78,7 @@ export class EnemyPool {
   // 특수 개체
   readonly elite = new Uint8Array(ENEMY_CAP);
   readonly boss = new Uint8Array(ENEMY_CAP);
+  readonly groggy = new Uint8Array(ENEMY_CAP); // 보스 그로기(틈) 상태 — 피해 증폭(#40 14.5)
   readonly controlled = new Uint8Array(ENEMY_CAP); // 보스: 외부에서 위치 제어
   readonly stun = new Float32Array(ENEMY_CAP); // 스턴 잔여 시간(장비 무쌍) — 이동/발사 정지
   readonly flee = new Uint8Array(ENEMY_CAP); // 1이면 플레이어 반대로 도주(보급 마차)
@@ -152,6 +153,7 @@ export class EnemyPool {
     this.shieldHits[i] = 0;
     this.elite[i] = 0;
     this.boss[i] = 0;
+    this.groggy[i] = 0;
     this.controlled[i] = 0;
     this.stun[i] = 0;
     this.flee[i] = 0;
