@@ -140,6 +140,8 @@ loadAtlas()
       // 무기(병법) 해금 판정 — save에서 파생(단조 증가), 신규분만 토스트 (DESIGN 13.1)
       const newWeapons = unlockedWeaponIds(save).filter((id) => !save.unlockedWeapons.includes(id));
       for (const id of newWeapons) save.unlockedWeapons.push(id);
+      // 명기 획득 이력 누적 (#36 도감)
+      for (const id of result.masterworks) if (!save.masterworks.includes(id)) save.masterworks.push(id);
       writeSave(save);
       audio.playJingle(result.victory ? 'victory' : 'defeat');
       if (newAchievements.length > 0 || newWeapons.length > 0) audio.sfx('achievement');

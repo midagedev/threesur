@@ -44,7 +44,9 @@ import { Boss, MINIBOSS_CYCLE } from './boss';
 import { BattlefieldEvents } from './events';
 import { BattlefieldObjects } from './objects';
 import type { BuffKind } from './player';
-import { RELIC_BY_ID, rollRelic, relicName, relicDesc } from '../data/relics';
+import { RELIC_BY_ID, rollRelic, relicName, relicDesc,
+  MASTERWORK_BY_ID, rollMasterworks, masterworkName, masterworkDesc } from '../data/relics';
+import { bossLine } from '../data/bossDialogue';
 import type { Weapon, WeaponContext } from './weapons/types';
 import { createWeapon } from './weapons/roster';
 import { LevelUp } from './levelup';
@@ -79,6 +81,7 @@ export interface RunResult {
   weapons: { id: string; level: number }[];
   passives: { id: string; level: number }[];
   bosses: string[]; // 처치한 보스 type id
+  masterworks: string[]; // 이번 런에서 획득한 명기 id (도감 이력 누적용)
   endless: boolean; // 무한 모드 진입 여부(10분 승리 후 계속 전투)
   canContinue: boolean; // 결과 화면에서 "계속 싸운다"(무한 진입) 가능 여부
 }
@@ -100,6 +103,7 @@ type Choice =
   | { kind: 'newPassive'; id: string }
   | { kind: 'upPassive'; id: string }
   | { kind: 'relic'; id: string }
+  | { kind: 'masterwork'; id: string }
   | { kind: 'reward'; id: 'heal' | 'gold' | 'xp' };
 
 const MAX_RELICS = 2;
@@ -188,6 +192,7 @@ export class Run {
   private killWindowCount = 0;
   private rerolledThisLevel = false;
   private relicIds: string[] = []; // 보유 저주 유물(카드 중복 방지·카운트)
+  private masterworkIds: string[] = []; // 보유 명기(보스 드랍, 상한 없음)
   private feverWasOn = false; // 콤보 피버 진입 감지
   private endless = false; // 무한 모드(10분 승리 후 계속)
   private victoryAchieved = false; // 10분 도달(이후 사망해도 승리 처리)
@@ -533,6 +538,7 @@ export class Run {
     this.hitstopRemaining = 0;
     this.musouStrength = 0;
     this.relicIds = [];
+    this.masterworkIds = [];
     this.endless = false;
     this.victoryAchieved = false;
     this.forceRelicNext = false;
@@ -927,6 +933,11 @@ export class Run {
         this.enemies.x[this.boss.idx] - this.player.x,
         this.enemies.z[this.boss.idx] - this.player.z,
       );
+      // 보스 등장 대사 (#37 q4 발췌·번안) — 상단 대사 박스로
+      if (this.boss.typeId) {
+        const line = bossLine(this.boss.typeId, 'appear');
+        if (line) this.hud.quote(nameOf('hero', this.boss.typeId, this.boss.name), line, 3200);
+      }
     }
   }
 
@@ -1096,7 +1107,12 @@ export class Run {
       this.flashScreen(0.4);
       this.hud.banner('討伐', '#e8c667', 90, 1600);
       audio.sfx('levelup');
-      if (this.boss.typeId) this.bossesKilled.add(this.boss.typeId);
+      if (this.boss.typeId) {
+        // 보스 처치 대사 (#37)
+        const line = bossLine(this.boss.typeId, 'death');
+        if (line) this.hud.quote(nameOf('hero', this.boss.typeId, this.boss.name), line, 3200);
+        this.bossesKilled.add(this.boss.typeId);
+      }
       audio.playBgm('battle'); // 보스 처치 → 전투 BGM 복귀
       this.addGold(Math.round(300 * this.player.stats.goldMul));
       this.kills++;
@@ -1177,6 +1193,18 @@ export class Run {
       audio.sfx('evolve');
       this.refreshLoadout();
       return;
+    }
+    // 보스 보상: 진화 불가 시 명기 3택 카드(미보유 풀). 전부 보유면 아래 기존 보상 폴백. (#36)
+    if (boss) {
+      const picks = rollMasterworks(() => rng.next(), this.masterworkIds, 3);
+      if (picks.length > 0) {
+        this.player.heal(this.player.maxHp * 0.5);
+        this.curChoices = picks.map((m) => ({ kind: 'masterwork', id: m.id }) as Choice);
+        this.state = 'levelup';
+        const views = this.curChoices.map((c) => this.cardView(c));
+        this.levelup.open(views, Math.floor(this.gold), false, (i) => this.pickCard(i), () => {});
+        return;
+      }
     }
     // 고급 보상: 회복 + 골드 + 경험치
     this.player.heal(this.player.maxHp * (boss ? 0.6 : 0.35));
@@ -1332,6 +1360,15 @@ export class Run {
       const d = RELIC_BY_ID[c.id];
       return { title: relicName(d), hanja: d.hanja, desc: relicDesc(d), tag: t('catRelic'), accent: '#c77dff', symbol: d.hanja[0], badge: t('tagCurse'), rare: true };
     }
+    if (c.kind === 'masterwork') {
+      const d = MASTERWORK_BY_ID[c.id];
+      return {
+        title: masterworkName(d), hanja: d.hanja, desc: masterworkDesc(d),
+        tag: en ? 'Masterwork 名器' : '명기 名器',
+        accent: '#f5c542', symbol: d.hanja[0],
+        badge: en ? 'RARE' : '名器', rare: true,
+      };
+    }
     // reward — 심볼(治/金/書)은 한자 공통
     const map = {
       heal: { name: t('rewardHealName'), hanja: '再整備', desc: t('rewardHealDesc'), symbol: '治' },
@@ -1369,6 +1406,15 @@ export class Run {
       this.relicIds.push(c.id);
       this.player.addRelic(c.id);
       audio.sfx('relic');
+    } else if (c.kind === 'masterwork') {
+      this.masterworkIds.push(c.id);
+      this.player.addMasterwork(c.id);
+      audio.sfx('relic');
+      // 획득 모먼트: 금빛 한자 문장 솟음 + 링 + 순간 광원 (절제된 단발)
+      const hz = MASTERWORK_BY_ID[c.id].hanja[0];
+      this.effects.spawnCrest(this.player.x, this.player.z, hz, 1.9, 1.5, 0.5, 2.0);
+      this.effects.spawnRing(this.player.x, this.player.z, 9, 1.9, 1.5, 0.5, 0.7);
+      if (this.effects.spawnLight) this.effects.spawnLight(this.player.x, this.player.z, 1.6, 1.2, 0.4, 10, 0.5);
     } else {
       if (c.id === 'heal') this.player.heal(this.player.maxHp * 0.5);
       else if (c.id === 'gold') this.gold += 200; // 런 내 리롤용(메타 적립 아님)
@@ -1452,6 +1498,7 @@ export class Run {
       weapons: this.weapons.map((w) => ({ id: w.id, level: w.level })),
       passives: Object.keys(this.passives).map((id) => ({ id, level: this.passives[id] })),
       bosses: Array.from(this.bossesKilled),
+      masterworks: [...this.masterworkIds],
       endless: this.endless,
       canContinue: victory && !this.endless && this.gameTime >= RUN_LENGTH,
     };
