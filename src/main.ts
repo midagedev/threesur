@@ -230,6 +230,7 @@ loadAtlas()
       unlockLvbu: () => unlockLvbu(),
       killPlayer: () => run.testKillPlayer(),
       damagePlayer: (n: number) => run.testDamagePlayer(n),
+      killBoss: () => run.testKillBoss(),
       get scene() {
         return scene;
       },

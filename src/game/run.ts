@@ -105,6 +105,12 @@ type Choice =
 const MAX_RELICS = 2;
 const RELIC_CHANCE = 0.1; // 레벨업 카드에 저주 유물 등장 확률
 
+// #24 XP 커브 2차식화: 선형(5+lv*10)은 초반 레벨업 스팸 유발 → 후반이 가팔라지는 2차식으로
+// 누적 XP를 늘려 Lv10 도달을 ~96s에서 ~3분으로. (스폰 밀도 #25와 함께 측정·튜닝)
+function nextXpFor(level: number): number {
+  return 8 + level * level * 3;
+}
+
 // 씬 상태머신 훅: Phase 3에서 Title→Select→Run→Result가 이 위에 붙는다.
 export class Run {
   readonly scene = new Scene();
@@ -163,7 +169,7 @@ export class Run {
   private kills = 0;
   private level = 1;
   private xp = 0;
-  private nextXp = 5 + 1 * 10;
+  private nextXp = nextXpFor(1);
   private pendingLevels = 0;
   private gold = 0; // 런 중 사용 가능 골드 (리롤에 소비)
   private goldEarned = 0; // 전투로 번 골드 누적 (메타 적립용, 리롤 무관)
@@ -175,6 +181,8 @@ export class Run {
   private attractTime = 0;
   private bossFlags = { b3: false, b6: false, b9: false };
   private frameKills = 0;
+  private killWindowT = 0; // #24 킬캠 롤링 윈도우(0.35s)
+  private killWindowCount = 0;
   private rerolledThisLevel = false;
   private relicIds: string[] = []; // 보유 저주 유물(카드 중복 방지·카운트)
   private feverWasOn = false; // 콤보 피버 진입 감지
@@ -531,7 +539,7 @@ export class Run {
     this.reviveUsed = false;
     const startLv = this.meta?.startLevel ?? 0;
     this.level = 1 + startLv;
-    this.nextXp = 5 + this.level * 10;
+    this.nextXp = nextXpFor(this.level);
     this.pendingLevels = startLv;
     this.hud.setVisible(true);
     this.hud.resetSlots();
@@ -669,10 +677,7 @@ export class Run {
     }
 
     // 선택 장수의 군웅전 NPC 카드 대사를 런 전반에 드문드문 노출한다.
-    if (this.gameTime >= this.nextHeroQuoteAt) {
-      this.sayHero();
-      this.nextHeroQuoteAt += 105;
-    }
+    if (this.gameTime >= this.nextHeroQuoteAt) this.sayHero(); // sayHero가 다음 시각 재예약
 
     // 보스 스케줄
     this.checkBossSpawn();
@@ -777,11 +782,18 @@ export class Run {
       this.hitstop(30, 0.08);
       this.rig.addTrauma(0.35);
     }
-    // 대량 퇴치 킬캠 (12킬+ 단일 프레임 → 슬로모 모먼트, 쿨다운은 cinematics가 관리)
-    if (this.frameKills >= 12) {
-      this.cinematics.onMassKill(this.frameKills);
+    // 대량 퇴치 킬캠: 단일 프레임(사실상 미발동) → 0.35s 롤링 윈도우 누적 10킬 임계. 쿨다운은 cinematics 관리.
+    this.killWindowT -= dt;
+    if (this.killWindowT <= 0) {
+      this.killWindowT = 0.35;
+      this.killWindowCount = 0;
+    }
+    this.killWindowCount += this.frameKills;
+    if (this.killWindowCount >= 10) {
+      this.cinematics.onMassKill(this.killWindowCount);
       this.postfx?.pulseBlur(0.6);
       this.hitstop(160, 0.4);
+      this.killWindowCount = -100000; // 같은 윈도우 내 재발동 방지(윈도우 리셋 시 0 복귀)
     }
 
     // 픽업
@@ -870,6 +882,8 @@ export class Run {
   private sayHero(durationMs = 3600): void {
     const line = pickLine(this.hero.id, this.heroQuoteCursor++);
     this.hud.quote(this.hero.name, line, durationMs);
+    // #24: 주기 대사 105→60s(~40% 단축). 이벤트 대사도 타이머를 리셋 → 이벤트 직후 주기 대사 중복 방지.
+    this.nextHeroQuoteAt = this.gameTime + 60;
   }
 
   private checkBossSpawn(): void {
@@ -1127,7 +1141,7 @@ export class Run {
     while (this.xp >= this.nextXp) {
       this.xp -= this.nextXp;
       this.level++;
-      this.nextXp = 5 + this.level * 10;
+      this.nextXp = nextXpFor(this.level);
       this.pendingLevels++;
       this.hud.punchLevel();
       audio.sfx('levelup');
@@ -1152,7 +1166,7 @@ export class Run {
     while (this.xp >= this.nextXp) {
       this.xp -= this.nextXp;
       this.level++;
-      this.nextXp = 5 + this.level * 10;
+      this.nextXp = nextXpFor(this.level);
       this.pendingLevels++;
     }
   };
@@ -1443,6 +1457,13 @@ export class Run {
   // QA용: 실제 피격 경로로 n 대미지(무적/부활 로직 포함). 부활→재사망 엣지 검증용.
   testDamagePlayer(n: number): void {
     this.onPlayerHit(n);
+  }
+
+  // QA/시각검증용: 활성 보스 즉시 처치(→ handleKill 보스 분기 → onBossDeath → PiP 리플레이). #26 검증 지원.
+  testKillBoss(): void {
+    if (!this.boss.active || this.boss.idx < 0) return;
+    const i = this.boss.idx;
+    if (this.enemies.damageAt(i, 1e9)) this.handleKill(i);
   }
 
   // #18 개발용: 무쌍 스펙터클 프리미티브를 플레이어 주변에 일괄 시연.
