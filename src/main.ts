@@ -14,7 +14,8 @@ import type { SaveData } from './core/save';
 import { computeMeta, UPGRADE_BY_ID, upgradeCost, LVBU_UNLOCK_COST } from './data/upgrades';
 import { evaluateAchievements, bestTitle } from './data/achievements';
 import { isHeroUnlocked, unlockedHeroIds } from './data/heroUnlocks';
-import { unlockedWeaponIds } from './data/weaponUnlocks';
+import { unlockedWeaponIds, isWeaponUnlocked } from './data/weaponUnlocks';
+import { WEAPON_DEFS } from './data/weapons';
 
 type Scene = 'title' | 'select' | 'run' | 'result' | 'shop' | 'pause';
 
@@ -92,12 +93,16 @@ loadAtlas()
       audio.playBgm('title');
       screens.showShop(save, tab);
     }
+    // isWeaponUnlocked는 미게이트 무기에 기본 true → 기본 풀 + 해금분 = 시작 풀
+    function availableStartWeapons(s: SaveData): string[] {
+      return Object.keys(WEAPON_DEFS).filter((id) => !WEAPON_DEFS[id].evolution && isWeaponUnlocked(id, s));
+    }
     function startRun(heroId: string, bypassUnlock = false): void {
       if (!bypassUnlock && !isHeroUnlocked(heroId, save)) return;
       lastHero = heroId;
       scene = 'run';
       screens.hide();
-      run.beginRun(heroId, computeMeta(save.upgrades));
+      run.beginRun(heroId, computeMeta(save.upgrades), availableStartWeapons(save));
       joystick.setVisible(touch);
     }
     function onRunEnd(result: RunResult): void {

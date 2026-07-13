@@ -151,6 +151,7 @@ export class Run {
   private readonly treasure: TreasurePool;
   private weapons: Weapon[];
   private passives: Record<string, number> = {};
+  private availableWeapons: Set<string> | null = null; // 시작 풀 해금 필터(null=전체 허용)
 
   private readonly combo: Combo;
   private readonly musou: Musou;
@@ -465,10 +466,11 @@ export class Run {
   }
 
   // 런 시작: 장수 + 메타 강화 적용 후 플레이 진입.
-  beginRun(heroId: string, meta: MetaMods): void {
+  beginRun(heroId: string, meta: MetaMods, unlockedWeapons?: string[]): void {
     this.setHero(heroId);
     this.meta = meta;
     this.player.setMeta(meta);
+    this.availableWeapons = unlockedWeapons ? new Set(unlockedWeapons) : null;
     this.restart();
   }
 
@@ -1233,6 +1235,7 @@ export class Run {
       for (const id in WEAPON_DEFS) {
         const def = WEAPON_DEFS[id];
         if (def.evolution) continue;
+        if (this.availableWeapons && !this.availableWeapons.has(id)) continue; // 미해금 무기 제외
         if (this.weapons.some((w) => w.id === id)) continue;
         pool.push({ kind: 'newWeapon', id });
       }
