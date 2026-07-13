@@ -6,6 +6,7 @@ import { BOSS_DEFS } from '../game/boss';
 import { ACHIEVEMENT_BY_ID, ACHIEVEMENTS } from '../data/achievements';
 import { DIALOGUE, anyRandomLine } from '../data/dialogue';
 import { heroUnlockText, isHeroUnlocked } from '../data/heroUnlocks';
+import { t, getLang, toggleLang, onLangChange } from '../core/i18n';
 import { openSharePreview } from './shareCard';
 import type { SaveData } from '../core/save';
 import type { RunResult } from '../game/run';
@@ -76,6 +77,8 @@ export class Screens {
   private readonly fade: HTMLDivElement;
   private muted = false;
   current: 'none' | 'title' | 'select' | 'result' | 'shop' | 'pause' = 'none';
+  // 언어 토글 시 현재 화면을 즉시(페이드 없이) 재구성하기 위한 재렌더 클로저.
+  private rerender: (() => void) | null = null;
 
   constructor(cb: ScreenCallbacks, atlas: Atlas) {
     this.cb = cb;
@@ -87,6 +90,11 @@ export class Screens {
 
     this.overlay = el('div', 'overlay');
     document.body.appendChild(this.overlay);
+
+    // 언어 변경 시 현재 화면 재구성.
+    onLangChange(() => {
+      if (this.rerender) this.rerender();
+    });
   }
 
   setMuted(m: boolean): void {
@@ -132,7 +140,7 @@ export class Screens {
   private muteButton(): HTMLButtonElement {
     const b = el('button', 'btn btn-icon');
     b.textContent = this.muted ? '🔇' : '🔊';
-    b.setAttribute('aria-label', '음소거 토글');
+    b.setAttribute('aria-label', '음소거 토글 / mute');
     b.addEventListener('click', () => {
       this.muted = this.cb.onToggleMute();
       b.textContent = this.muted ? '🔇' : '🔊';
@@ -140,41 +148,53 @@ export class Screens {
     return b;
   }
 
+  // 한/영 토글 버튼. 클릭 시 언어 전환 → onLangChange 구독이 현재 화면 재렌더.
+  private langButton(): HTMLButtonElement {
+    const b = el('button', 'btn btn-icon');
+    b.textContent = getLang() === 'ko' ? 'EN' : 'KO'; // 누르면 바뀔 대상 언어 표시
+    b.setAttribute('aria-label', 'language / 언어');
+    b.addEventListener('click', () => {
+      toggleLang();
+    });
+    return b;
+  }
+
   // ===== 타이틀 =====
   showTitle(instant = false): void {
     this.current = 'title';
-    this.show(() => {
+    // 타이틀 진입 시 한 번 뽑은 혼잣말을 재렌더(언어 토글) 동안 유지.
+    const m = anyRandomLine();
+    const build = (): void => {
       const s = el('div', 'screen');
       const mark = el('div', 'title-mark');
-      mark.appendChild(el('div', 'title-hanja', '一騎當千'));
-      mark.appendChild(el('div', 'title-kor', '일 기 당 천'));
-      mark.appendChild(el('div', 'title-tag', '삼국 서바이버 · 한 명의 장수로 수천을 베어라'));
+      mark.appendChild(el('div', 'title-hanja', '一騎當千')); // 한자 로고 — 양 언어 공통
+      mark.appendChild(el('div', 'title-kor', t('titleKor')));
+      mark.appendChild(el('div', 'title-tag', t('titleTag')));
       s.appendChild(mark);
 
       const primary = el('div', 'btn-row');
-      primary.appendChild(this.button('출진 出陣', this.cb.onStart, { primary: true }));
+      primary.appendChild(this.button(t('start'), this.cb.onStart, { primary: true }));
       s.appendChild(primary);
 
       const secondary = el('div', 'btn-row');
-      secondary.appendChild(this.button('본진 本陣', () => this.cb.onOpenShop('upgrade')));
-      secondary.appendChild(this.button('전공 戰功', () => this.cb.onOpenShop('codex')));
+      secondary.appendChild(this.button(t('shop'), () => this.cb.onOpenShop('upgrade')));
+      secondary.appendChild(this.button(t('codex'), () => this.cb.onOpenShop('codex')));
       secondary.appendChild(this.muteButton());
+      secondary.appendChild(this.langButton());
       s.appendChild(secondary);
 
-      s.appendChild(
-        el(
-          'div',
-          'controls-hint',
-          '<b>WASD / 화살표</b> 이동 &nbsp;·&nbsp; <b>Space</b> 무쌍난무 &nbsp;·&nbsp; <b>Esc</b> 일시정지<br>모바일: 좌측 가상 조이스틱 + 우측 무쌍 버튼',
-        ),
-      );
+      s.appendChild(el('div', 'controls-hint', t('controlsHint')));
 
-      // 타이틀 진입마다 장수 혼잣말 한 줄 (군웅전 대사)
-      const m = anyRandomLine();
+      // 장수 혼잣말 (군웅전 대사) — 대사 영어 번역은 후속 단계, 현재는 원문 유지.
       if (m.line) s.appendChild(el('div', 'title-quote', `“${m.line}” <span class="who">— ${m.name}</span>`));
 
       this.overlay.appendChild(s);
-    }, instant);
+    };
+    this.rerender = () => {
+      this.overlay.textContent = '';
+      build();
+    };
+    this.show(build, instant);
   }
 
   // ===== 장수 선택 =====
