@@ -254,8 +254,10 @@ export class InstancedSpriteRenderer {
 export class SpriteQuad {
   readonly mesh: Mesh;
   private readonly mat: ShaderMaterial;
+  private readonly worldH: number;
 
   constructor(sheet: SheetInfo, worldH = SPRITE_WORLD_H) {
+    this.worldH = worldH;
     this.mat = new ShaderMaterial({
       uniforms: {
         uMap: { value: sheet.texture },
@@ -288,6 +290,11 @@ export class SpriteQuad {
   // 림 강도(모바일 저해상도 블룸에서 캐릭터가 묻히지 않게 낮춤).
   setRimScale(s: number): void {
     this.mat.uniforms.uRim.value = s;
+  }
+
+  // 스쿼시&스트레치: 폭/높이 비대칭 스케일(부피 보존). sy>1이면 세로로 늘어남.
+  setSquash(sx: number, sy: number): void {
+    this.mesh.scale.set(this.worldH * sx, this.worldH * sy, this.worldH * sx);
   }
 
   setUv(u: number, v: number): void {

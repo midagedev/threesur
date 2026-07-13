@@ -41,6 +41,8 @@ export class EffectsSystem {
   private rCur = 0;
   private bCur = 0;
   private cCur = 0;
+  private readonly flashes: Slot[] = [];
+  private fCur = 0;
   private readonly attackSprites: RetroAttackSpriteFx;
 
   // 낙뢰 시 화면 미세 플래시 (run이 주입)
@@ -83,6 +85,13 @@ export class EffectsSystem {
     chainGeo.translate(0.5, 0, 0);
     for (let i = 0; i < 40; i++) {
       this.chains.push(this.makeSlot(chainGeo, CHAIN_FRAG, 0.12));
+    }
+
+    // 킬 플래시(발광 원반) — 불 켜지는 듯한 순간 광점. 풀 크기가 동시 상한.
+    const flashGeo = new RingGeometry(0, 1, 28);
+    flashGeo.rotateX(-Math.PI / 2);
+    for (let i = 0; i < 24; i++) {
+      this.flashes.push(this.makeSlot(flashGeo, FLASH_FRAG, 0.2));
     }
   }
 
@@ -203,6 +212,21 @@ export class EffectsSystem {
     s.mat.uniforms.uT.value = 0;
   }
 
+  // 킬/대시 순간 광점(발광 원반). 짧게 확장하며 페이드.
+  spawnFlash(x: number, z: number, r: number, g: number, b: number, radius: number): void {
+    const s = this.flashes[this.fCur];
+    this.fCur = (this.fCur + 1) % this.flashes.length;
+    s.age = 0;
+    s.dur = 0.2;
+    s.active = true;
+    s.data = radius;
+    s.mesh.visible = true;
+    s.mesh.position.set(x, 0.45, z);
+    s.mesh.scale.setScalar(radius * 0.6);
+    (s.mat.uniforms.uColor.value as Color).setRGB(r, g, b);
+    s.mat.uniforms.uT.value = 0;
+  }
+
   // 낙뢰 볼트 (세로) + 착지 링 + 화면 미세 플래시.
   spawnLightning(x: number, z: number, r = 1.4, g = 1.8, b = 2.6, height = 7): void {
     const s = this.bolts[this.bCur];
@@ -244,6 +268,7 @@ export class EffectsSystem {
     this.tickThrust(dt);
     this.tickArc(dt);
     this.tickRing(dt);
+    this.tickFlash(dt);
     this.tickSimple(this.bolts, dt);
     this.tickSimple(this.chains, dt);
   }
@@ -285,6 +310,20 @@ export class EffectsSystem {
       }
       const sc = s.data * (0.15 + 0.85 * (1 - (1 - t) * (1 - t)));
       s.mesh.scale.setScalar(sc);
+      s.mat.uniforms.uT.value = t;
+    }
+  }
+
+  private tickFlash(dt: number): void {
+    for (const s of this.flashes) {
+      if (!s.active) continue;
+      s.age += dt;
+      const t = s.age / s.dur;
+      if (t >= 1) {
+        this.retire(s);
+        continue;
+      }
+      s.mesh.scale.setScalar(s.data * (0.6 + 0.6 * t)); // 순간 확장
       s.mat.uniforms.uT.value = t;
     }
   }
@@ -410,6 +449,21 @@ const RING_FRAG = /* glsl */ `
     float fade = 1.0 - uT;
     float b = fade * 1.4;
     gl_FragColor = vec4(uColor * b * 1.3, fade);
+  }
+`;
+
+// 킬/대시 광점: 중심 밝고 가장자리 부드러운 발광 원반.
+const FLASH_FRAG = /* glsl */ `
+  uniform float uT;
+  uniform vec3 uColor;
+  varying vec2 vUv;
+  void main() {
+    float r = length(vUv - 0.5) * 2.0;
+    float core = smoothstep(1.0, 0.0, r);
+    float fade = 1.0 - uT;
+    float b = core * fade;
+    if (b <= 0.001) discard;
+    gl_FragColor = vec4(uColor * b * 1.6, b);
   }
 `;
 

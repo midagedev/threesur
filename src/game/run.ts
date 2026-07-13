@@ -250,6 +250,7 @@ export class Run {
     this.boss = new Boss(atlas, (name, hanja) => {
       this.hud.banner(`${name} 등장 ${hanja}`, '#e85c4a', 44, 1800);
       this.sayHero();
+      this.rig.cinematic(-0.12); // 보스 등장 시네마틱 줌인
       audio.sfx('bossHorn');
       audio.playBgm('boss');
     });
@@ -564,6 +565,7 @@ export class Run {
     // 무쌍 발동
     if (this.input.consumePressed('Space') && this.musou.activate()) {
       this.rig.addTrauma(0.5);
+      this.rig.cinematic(-0.16); // 시네마틱 줌인
       this.flashScreen(0.35);
     }
 
@@ -590,6 +592,22 @@ export class Run {
     this.player.setPosition(this.moveOut.x, this.moveOut.z);
     this.map.update(this.player.x, this.player.z, 0);
     this.world.update();
+
+    // 대시: 지면 리플 + 발광 스트릭 + 먼지 잔상 + 시네마틱 줌 + 트라우마
+    if (this.player.justDashed) {
+      this.player.justDashed = false;
+      const dpx = this.player.x;
+      const dpz = this.player.z;
+      const ddx = this.player.dashDirX;
+      const ddz = this.player.dashDirZ;
+      this.effects.spawnRing(dpx, dpz, 4.5, 1.4, 1.9, 2.4, 0.35);
+      this.effects.spawnThrust(dpx, dpz, ddx, ddz, 6, 2.0, 0.7, 1.4, 2.2, 0.22);
+      this.effects.spawnFlash(dpx, dpz, 0.8, 1.4, 2.2, 2.2);
+      for (let d = 0; d < 6; d++) this.particles.dust(dpx - ddx * d * 0.4, dpz - ddz * d * 0.4);
+      this.rig.cinematic(-0.06);
+      this.rig.punchFov(1.5);
+      audio.sfx('warn');
+    }
 
     // 선택 장수의 군웅전 NPC 카드 대사를 런 전반에 드문드문 노출한다.
     if (this.gameTime >= this.nextHeroQuoteAt) {
@@ -706,6 +724,15 @@ export class Run {
     this.ground.update(dt, this.player.x, this.player.z);
     this.map.update(this.player.x, this.player.z, dt);
     this.world.update();
+    // 동적 카메라: 주변 위협 밀도 줌아웃 + 진행방향 룩어헤드
+    const threatN = this.hash.query(this.player.x, this.player.z, 11, this.scratch);
+    let near = 0;
+    for (let c = 0; c < threatN; c++) {
+      const j = this.scratch[c];
+      if (this.enemies.alive[j] === 1 && this.enemies.controlled[j] === 0) near++;
+    }
+    this.rig.setThreat(Math.min(1, near / 45));
+    this.rig.setLookAhead(this.player.velX, this.player.velZ, this.player.speedFrac);
     this.rig.update(dt, this.player.x, this.player.z);
 
     if (this.gateRushTimer > 0) {
@@ -874,6 +901,7 @@ export class Run {
       this.particles.burst(x, z, 2.6, 1.6, 0.7, 60, 8);
       this.effects.spawnRing(x, z, 16, 2.4, 1.6, 0.8, 0.7);
       this.effects.spawnRing(x, z, 10, 2.2, 1.2, 2.0, 0.5);
+      this.effects.spawnFlash(x, z, 2.6, 2.0, 1.0, 7);
       this.treasure.spawn(x, z, true);
       this.hitstop(120, 0.05);
       this.rig.addTrauma(0.9);
@@ -890,6 +918,7 @@ export class Run {
     if (en.elite[i] === 1) {
       this.particles.burst(x, z, 2.4, 1.4, 0.7, 26, 6);
       this.effects.spawnRing(x, z, 6, 2.2, 1.6, 0.8, 0.5);
+      this.effects.spawnFlash(x, z, 2.2, 1.6, 0.8, 3.6);
       this.treasure.spawn(x, z, false);
       this.hitstop(60, 0.06);
       this.rig.addTrauma(0.4);
@@ -905,6 +934,10 @@ export class Run {
     this.addGold(this.player.stats.goldMul); // 소량 누적
     this.kills++;
     this.frameKills++;
+    // 킬 광점(프레임당 2회 상한 — 대량 처치 시 글로우 폭주 방지)
+    if (this.frameKills <= 2) {
+      this.effects.spawnFlash(x, z, 1.5 * en.tr[i], 0.95 * en.tg[i], 0.5 * en.tb[i], 1.4);
+    }
     audio.sfx('hit');
     const bonus = this.combo.onKill();
     if (this.combo.count > this.maxCombo) this.maxCombo = this.combo.count;

@@ -31,6 +31,21 @@ const ANIM_FPS = 8;
 const INVULN = 0.5;
 const FLASH_DECAY = 6;
 export const PLAYER_RADIUS = 0.5;
+// 이동 손맛: 가속 반응/관성 감쇠 + i-frame 대시
+const ACCEL = 20; // 목표 속도로 수렴하는 반응(클수록 즉각적)
+const DECEL = 13; // 입력 없을 때 관성 감쇠(클수록 빨리 멈춤)
+const DASH_TIME = 0.16; // 대시 지속
+const DASH_CD = 0.8; // 대시 쿨다운
+const DASH_SPEED_MUL = 3.8; // 대시 속도 배수
+const DASH_IFRAME = 0.24; // 대시 무적 시간
+const DOUBLE_TAP = 0.26; // 더블탭 인정 간격
+const TAP_DIR: Record<string, { x: number; z: number }> = {
+  KeyW: { x: 0, z: -1 }, ArrowUp: { x: 0, z: -1 },
+  KeyS: { x: 0, z: 1 }, ArrowDown: { x: 0, z: 1 },
+  KeyA: { x: -1, z: 0 }, ArrowLeft: { x: -1, z: 0 },
+  KeyD: { x: 1, z: 0 }, ArrowRight: { x: 1, z: 0 },
+};
+const TAP_CODES = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'];
 
 export class Player {
   x = 0;
@@ -57,6 +72,36 @@ export class Player {
   private frame = 0;
   private animTime = 0;
   private moving = false;
+
+  // 이동 손맛 상태
+  private vx = 0;
+  private vz = 0;
+  private dashT = 0;
+  private dashCd = 0;
+  private ddx = 0;
+  private ddz = 1;
+  private time = 0;
+  private lastTapCode = '';
+  private lastTapAt = -1;
+  private sqSX = 1;
+  private sqSY = 1;
+  justDashed = false; // run이 읽어 잔상/리본/카메라 펄스 트리거 (읽은 뒤 false로)
+  dashDirX = 0;
+  dashDirZ = 1;
+
+  get dashing(): boolean {
+    return this.dashT > 0;
+  }
+  get velX(): number {
+    return this.vx;
+  }
+  get velZ(): number {
+    return this.vz;
+  }
+  // 최대속도 대비 현재 속력(0..~1). 동적 카메라 룩어헤드에 사용.
+  get speedFrac(): number {
+    return Math.hypot(this.vx, this.vz) / Math.max(0.01, this.baseSpeed * this.stats.speedMul);
+  }
 
   private baseSpeed: number;
   private baseHp: number;
@@ -203,22 +248,81 @@ export class Player {
     this.flash = 0;
     this.faceX = 0;
     this.faceZ = 1;
+    this.vx = 0;
+    this.vz = 0;
+    this.dashT = 0;
+    this.dashCd = 0;
+    this.sqSX = 1;
+    this.sqSY = 1;
+    this.justDashed = false;
   }
 
   update(dt: number, input: Input): void {
+    this.time += dt;
     const mx = input.move.x;
     const mz = input.move.z;
     const len = Math.hypot(mx, mz);
-    this.moving = len > 0;
-    if (this.moving) {
-      const nx = mx / len;
-      const nz = mz / len;
+    const inMove = len > 0;
+    const nx = inMove ? mx / len : 0;
+    const nz = inMove ? mz / len : 0;
+
+    // 대시 입력: Shift 또는 방향키 더블탭
+    let dashReq = false;
+    let rdx = inMove ? nx : this.faceX;
+    let rdz = inMove ? nz : this.faceZ;
+    if (input.consumePressed('ShiftLeft') || input.consumePressed('ShiftRight')) dashReq = true;
+    for (const code of TAP_CODES) {
+      if (!input.consumePressed(code)) continue;
+      if (this.lastTapCode === code && this.time - this.lastTapAt < DOUBLE_TAP) {
+        dashReq = true;
+        rdx = TAP_DIR[code].x;
+        rdz = TAP_DIR[code].z;
+      }
+      this.lastTapCode = code;
+      this.lastTapAt = this.time;
+    }
+    if (this.dashCd > 0) this.dashCd -= dt;
+    if (dashReq && this.dashCd <= 0 && this.dashT <= 0) {
+      const l = Math.hypot(rdx, rdz) || 1;
+      this.ddx = rdx / l;
+      this.ddz = rdz / l;
+      this.dashT = DASH_TIME;
+      this.dashCd = DASH_CD;
+      this.invuln = Math.max(this.invuln, DASH_IFRAME);
+      this.faceX = this.ddx;
+      this.faceZ = this.ddz;
+      this.dashDirX = this.ddx;
+      this.dashDirZ = this.ddz;
+      this.justDashed = true;
+    }
+
+    // 속도 통합: 대시 오버라이드 / 가속 수렴 / 관성 감쇠
+    const maxSp = this.baseSpeed * this.stats.speedMul;
+    if (this.dashT > 0) {
+      this.dashT -= dt;
+      const ds = maxSp * DASH_SPEED_MUL;
+      this.vx = this.ddx * ds;
+      this.vz = this.ddz * ds;
+    } else if (inMove) {
       this.faceX = nx;
       this.faceZ = nz;
-      const sp = this.baseSpeed * this.stats.speedMul;
-      this.x += nx * sp * dt;
-      this.z += nz * sp * dt;
-      this.dir = dirFromVelocity(nx, nz, this.dir);
+      const k = 1 - Math.exp(-ACCEL * dt);
+      this.vx += (nx * maxSp - this.vx) * k;
+      this.vz += (nz * maxSp - this.vz) * k;
+    } else {
+      const k = Math.exp(-DECEL * dt);
+      this.vx *= k;
+      this.vz *= k;
+      if (Math.abs(this.vx) < 0.02) this.vx = 0;
+      if (Math.abs(this.vz) < 0.02) this.vz = 0;
+    }
+    this.x += this.vx * dt;
+    this.z += this.vz * dt;
+
+    const spd = Math.hypot(this.vx, this.vz);
+    this.moving = spd > 0.05;
+    if (this.moving) {
+      this.dir = dirFromVelocity(this.vx, this.vz, this.dir);
       this.animTime += dt;
       this.frame = ((this.animTime * ANIM_FPS) | 0) % 4;
     } else {
@@ -246,6 +350,16 @@ export class Player {
     if (this.stats.hpRegen > 0 && this.hp < this.maxHp) {
       this.hp = Math.min(this.maxHp, this.hp + this.stats.hpRegen * dt);
     }
+
+    // 스쿼시&스트레치: 대시=늘어남, 질주=미세, 정지=원형 (부피 보존)
+    let tsy = 1;
+    if (this.dashT > 0) tsy = 1.28;
+    else if (spd > maxSp * 0.55) tsy = 1.07;
+    const tsx = 1 / Math.sqrt(tsy);
+    const sk = Math.min(1, dt * 16);
+    this.sqSX += (tsx - this.sqSX) * sk;
+    this.sqSY += (tsy - this.sqSY) * sk;
+    this.quad.setSquash(this.sqSX, this.sqSY);
 
     cellUvOffset(this.atlas.sgrade, this.blockPx, 0, this.dir, this.frame, this.uv);
     this.quad.setUv(this.uv.u, this.uv.v);
