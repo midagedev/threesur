@@ -581,6 +581,145 @@ canvas {
   border-color: #2f4a5e;
 }
 
+/* ===== 레벨업 3택 카드 (반응형: 3열 유지 + 뷰포트 내 축소) ===== */
+.levelup-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  background: rgba(6, 7, 12, 0.86);
+  font-family: 'Nanum Myeongjo', 'Times New Roman', serif;
+  padding: max(env(safe-area-inset-top, 0px), 10px) max(env(safe-area-inset-right, 0px), 10px)
+    max(env(safe-area-inset-bottom, 0px), 10px) max(env(safe-area-inset-left, 0px), 10px);
+  overflow: hidden;
+}
+.levelup-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(8px, 2.2vh, 16px);
+  width: 100%;
+  max-height: 100%;
+}
+.levelup-title {
+  color: #e8c667;
+  font-size: clamp(17px, 3.2vh, 26px);
+  letter-spacing: 4px;
+  text-shadow: 0 0 12px rgba(232, 198, 103, 0.5);
+  text-align: center;
+}
+.levelup-title span {
+  font-size: 0.7em;
+  opacity: 0.7;
+}
+.levelup-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: clamp(6px, 1.6vw, 18px);
+  justify-content: center;
+  align-items: stretch;
+  width: 100%;
+  max-width: 700px;
+}
+.levelup-card {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 210px;
+  padding: clamp(12px, 2.4vh, 22px) clamp(8px, 1vw, 16px);
+  background: linear-gradient(180deg, #14151d, #0a0b11);
+  border: 1px solid #6b5a2e;
+  border-radius: 10px;
+  box-shadow: 0 0 18px rgba(232, 198, 103, 0.12), inset 0 0 0 1px rgba(232, 198, 103, 0.12);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(5px, 1.4vh, 12px);
+  transition: transform 0.08s, border-color 0.12s, box-shadow 0.12s;
+}
+.levelup-card:hover {
+  transform: translateY(-4px);
+}
+.lc-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: clamp(9px, 1.4vh, 11px);
+  letter-spacing: 1px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid;
+}
+.lc-symbol {
+  width: clamp(38px, 7.5vh, 56px);
+  height: clamp(38px, 7.5vh, 56px);
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(20px, 4.4vh, 30px);
+  background: radial-gradient(circle at 40% 35%, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.35));
+  border: 1.5px solid;
+}
+.lc-tag {
+  font-size: clamp(9px, 1.5vh, 11px);
+  letter-spacing: 2px;
+  opacity: 0.85;
+  text-align: center;
+}
+.lc-title {
+  color: #f0e4c0;
+  font-size: clamp(15px, 2.6vh, 20px);
+  letter-spacing: 1px;
+  text-align: center;
+}
+.lc-hanja {
+  font-size: clamp(11px, 1.9vh, 14px);
+  opacity: 0.9;
+  text-align: center;
+}
+.lc-desc {
+  color: #d8dae2;
+  font-size: clamp(11px, 1.8vh, 14px);
+  line-height: 1.4;
+  text-align: center;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+.lc-num {
+  margin-top: auto;
+  color: #5a6070;
+  font-size: clamp(16px, 2.6vh, 22px);
+}
+.levelup-bottom {
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 3vw, 20px);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.levelup-hint {
+  color: #8a8f9c;
+  font-size: clamp(11px, 1.6vh, 13px);
+  letter-spacing: 2px;
+}
+.levelup-reroll {
+  padding: 8px 16px;
+  border: 1px solid #6b5a2e;
+  border-radius: 6px;
+  color: #e8c667;
+  font-size: clamp(12px, 1.8vh, 14px);
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+
 /* ===== HUD 반응형 (작은 화면 축소) ===== */
 @media (max-width: 560px) {
   .hud-top {
