@@ -252,3 +252,59 @@ const NAME_EN: Record<'hero' | 'weapon' | 'passive' | 'upgrade', Record<string, 
     revive: 'Rise from Death',
   },
 };
+
+// ===== 데이터 파일용 영어 사전 (독점 창 배선 대비 미리 확충; en 오버라이드, ko는 데이터 원본) =====
+// 무기 설명 (WEAPON_DEFS[id].desc 대응)
+export const WEAPON_DESC_EN: Record<string, string> = {
+  spear: 'Piercing forward thrust',
+  guandao: 'Forward fan-shaped slash',
+  zhangba: 'Front & rear thrust + knockback',
+  baiyu: 'Homing talisman projectiles',
+  crossbow: 'Auto rapid-fire at nearest foe',
+  fire: 'Flame field underfoot',
+  thunder: 'Lightning strikes overhead',
+  orbit: 'Orbiting Taiji orbs',
+  halberd: '360° sweeping spin',
+  cavalry: 'Summoned cavalry charge',
+  zhanma: 'Launches spinning slash waves',
+  bamen: 'Piercing talisman storm',
+  chibi: 'Advancing wall of flame',
+  tianfa: 'Chain lightning between foes',
+  yuanrong: 'Omnidirectional volley',
+};
+
+// 업적 (achievements.ts의 name/desc 대응; 한자는 공통 유지)
+export const ACH_EN: Record<string, { name: string; desc: string }> = {
+  first_win: { name: 'Lord of the Realm', desc: 'First victory (survive 10:00)' },
+  slay_lvbu: { name: 'Slayer of the Flying General', desc: 'Defeat the final boss Lü Bu' },
+  thousand_cut: { name: 'Thousand-Slayer', desc: 'Slay 1,000 in a single run' },
+  five_hundred_cut: { name: 'Five-Hundred-Slayer', desc: 'Slay 500 in a single run' },
+  invincible: { name: 'Adamantine Body', desc: 'Take no hit for 3 minutes' },
+  master_smith: { name: 'Legendary Smith', desc: '3+ evolved weapons in one run' },
+  combo_master: { name: 'Avatar of the Combo', desc: 'Exceed a 500 max combo' },
+  veteran: { name: 'Grizzled Veteran', desc: '10,000 cumulative kills' },
+  all_bosses: { name: 'Ender of the Warlords', desc: 'Slay all three bosses in one run' },
+  high_level: { name: 'Master of War', desc: 'Reach level 40' },
+  endless_walker: { name: 'Nameless Reaper', desc: 'Survive 15 min in endless mode' },
+  survivor: { name: 'Battle-Tested Hero', desc: 'Survive 5+ minutes' },
+};
+
+// 장수 고유 보너스 (heroes.ts bonusText 대응)
+export const HERO_BONUS_EN: Record<string, string> = {
+  zhaoyun: 'Move speed +10%',
+  guanyu: 'Attack +15%',
+  zhangfei: 'Max HP +25%',
+  zhugeliang: 'Cooldown -10%',
+  huangzhong: 'Range & projectile speed +20%',
+  lvbu: 'Attack +25%, damage taken +25%',
+};
+
+// 장수 무쌍 설명 (screens.musouText 대응)
+export const HERO_MUSOU_EN: Record<string, string> = {
+  zhaoyun: 'Musou · Spear Charge — 8-way invincible dash',
+  guanyu: 'Musou · Azure Dragon Whirl — giant spinning slash',
+  zhangfei: 'Musou · Roar of Changban — full-screen stun',
+  zhugeliang: 'Musou · Heavenly Thunder — lightning storm',
+  huangzhong: 'Musou · Hundred-Pace Volley — omnidirectional arrows',
+  lvbu: 'Musou · Red Hare Rampage — steerable invincible dash',
+};
