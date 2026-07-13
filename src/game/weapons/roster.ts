@@ -583,13 +583,17 @@ export class TwinringWeapon extends TimedWeapon {
           this.hitN[i] = 0; // 귀환 패스 재타격 허용 → 왕복 각 1회
         }
       } else {
-        // 귀환: 현재 플레이어 위치로 홈잉
+        // 귀환: 플레이어로 홈잉 + 수직 성분으로 곡선 아치(부메랑 손맛). 남은 거리에 비례해
+        // 휘었다가 근접 시 펴져 손으로 빨려든다.
         const tx = ctx.px - this.bx[i];
         const tz = ctx.pz - this.bz[i];
         const dd = Math.hypot(tx, tz) || 1;
+        const nx = tx / dd;
+        const nz = tz / dd;
         const step = TwinringWeapon.RET_SPEED * ctx.dt;
-        this.bx[i] += (tx / dd) * step;
-        this.bz[i] += (tz / dd) * step;
+        const curve = Math.min(1, dd / this.maxD[i]) * 3.4; // 멀수록 크게 휨, 근접 시 0
+        this.bx[i] += nx * step + -nz * curve * ctx.dt;
+        this.bz[i] += nz * step + nx * curve * ctx.dt;
         if (dd <= 0.9) { this.active[i] = 0; continue; }
       }
       if (this.life[i] <= 0) { this.active[i] = 0; continue; }
@@ -638,6 +642,8 @@ export class TwinringWeapon extends TimedWeapon {
     ctx.particles.emit(px + Math.cos(s) * wr, 0.9, pz + Math.sin(s) * wr, 0, 0, 0, 0.95, 0.62, 0.14, 0.6, 0.1, 0, 0.9); // 금
     ctx.particles.emit(px + Math.cos(s + Math.PI) * wr, 0.9, pz + Math.sin(s + Math.PI) * wr, 0, 0, 0, 0.9, 0.12, 0.14, 0.6, 0.1, 0, 0.9); // 진홍
     ctx.particles.emit(px, 0.9, pz, 0, 0, 0, 0.5, 0.22, 0.08, 0.42, 0.08, 0, 0.9); // 은은한 금핵
+    // 저순위 미니 금광원 추종(무쌍 광원과 강도·반경으로 자연 분리). 확률 게이트로 필드 부담 억제.
+    if (ctx.rng.next() < 0.6) ctx.effects.spawnLight?.(px, pz, 0.42, 0.3, 0.09, 1.5, 0.1);
   }
 }
 

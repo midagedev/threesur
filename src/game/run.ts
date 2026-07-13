@@ -13,6 +13,7 @@ import { DamageText } from '../gfx/damageText';
 import { Labels } from '../gfx/labels';
 import { MarkerLayer } from '../gfx/markers';
 import { LightField } from '../gfx/lightField';
+import { WaveBanner } from '../gfx/banner';
 import { DecalPool } from '../gfx/decals';
 import { Player } from './player';
 import { EnemyPool, ENEMY_CAP, SHEET_SGRADE, SHEET_APRIORITY } from './enemies';
@@ -136,6 +137,7 @@ export class Run {
   private readonly shadowR: ShadowRenderer;
   private readonly effects: EffectsSystem;
   private readonly lightField: LightField;
+  private readonly banner: WaveBanner;
   private readonly decals: DecalPool;
   private readonly particles: ParticleSystem;
   private readonly damageText: DamageText;
@@ -268,6 +270,9 @@ export class Run {
     this.scene.add(this.player.mesh);
     this.companion = new Companion(this.scene, atlas, lu);
     this.spawner = new Spawner(atlas, this.enemies, this.map);
+    this.banner = new WaveBanner(this.scene);
+    // 세력(웨이브) 전환 → 펄럭이는 배너 연출 (DESIGN 14.4 쇼케이스)
+    this.spawner.onWave = (f) => this.banner.trigger(f.hanja, f.ko, f.banner);
     this.weapons = [createWeapon(this.hero.startWeapon)];
 
     this.combo = new Combo(
@@ -491,6 +496,7 @@ export class Run {
     this.labels.reset();
     this.markers.reset();
     this.lightField.reset();
+    this.banner.reset();
     this.decals.reset();
     this.lowHpVignette.style.opacity = '0';
     this.lowHpBeat = 0;
@@ -840,6 +846,7 @@ export class Run {
     this.rig.setLookAhead(this.player.velX, this.player.velZ, this.player.speedFrac);
     this.cinematics.update(dt); // 시네마틱 포즈를 rig에 밀어넣은 뒤 rig.update
     this.rig.update(dt, this.player.x, this.player.z);
+    this.banner.update(dt, this.rig.camera); // rig 갱신 후 카메라 정면에 배너 배치
 
     if (this.gateRushTimer > 0) {
       this.gateRushTimer -= dt;

@@ -21,19 +21,48 @@ const RING_MAX = 24;
 const ENEMY_SOFT_CAP = 420; // #25 동시 최대 소프트 캡(체감·가독성; 여전히 대군, 성능 300+ 여유)
 const ELITE_INTERVAL = 90; // 초
 
-// 분마다 도는 강조 틴트 팔레트(색변형과 별개로 미세 색조 로테이션)
-const PALETTE: [number, number, number][] = [
-  [1, 1, 1],
-  [1.15, 1.0, 0.85],
-  [0.9, 1.05, 1.2],
-  [1.2, 0.9, 1.0],
-  [1.0, 1.15, 0.95],
-  [1.2, 1.1, 0.8],
-  [0.95, 0.95, 1.25],
-  [1.25, 0.95, 0.9],
-  [1.1, 1.2, 1.0],
-  [1.2, 1.0, 1.15],
+// 웨이브(세력) 색군 — DESIGN 14.4.
+// 대군이 "한 세력"으로 읽히도록 시간대별 응집 틴트 그룹(2~3색)을 쓰고, 단계가 바뀌면 톤이 전환된다.
+// 가독성 게이트: 어떤 틴트도 (R·G·B 동시 高=플레이어 백금) / (G·B 高=플레이어 청록) / (R·B 高·G 低=마탄 마젠타)
+// 영역에 들어가지 않게 큐레이션 → 피아·투사체 언어(플레이어 금빛 림 / 적 어두운 외곽 / 마탄 진홍·마젠타)와 충돌 없음.
+export interface Faction {
+  id: string;
+  ko: string;
+  hanja: string;
+  en: string;
+  banner: [number, number, number]; // 배너 대표색(밝게, 0..1)
+  tints: [number, number, number][]; // 병사 몸체 미세 틴트 그룹(응집·혼합)
+  variantStart: number; // 색변형 스프라이트 인덱스 구간 시작
+  variantCount: number;
+}
+
+const FACTIONS: Faction[] = [
+  { id: 'yellowturban', ko: '황건적', hanja: '黃巾', en: 'Yellow Turbans',
+    banner: [0.85, 0.62, 0.24],
+    tints: [[1.32, 1.06, 0.5], [1.38, 1.12, 0.56], [1.24, 0.98, 0.46]],
+    variantStart: 0, variantCount: 7 },
+  { id: 'dongzhuo', ko: '동탁군', hanja: '董卓', en: "Dong Zhuo's Host",
+    banner: [0.72, 0.2, 0.17],
+    tints: [[1.4, 0.66, 0.56], [1.28, 0.58, 0.5], [1.46, 0.74, 0.64]],
+    variantStart: 7, variantCount: 7 },
+  { id: 'yuanshao', ko: '원소군', hanja: '袁紹', en: "Yuan Shao's Host",
+    banner: [0.24, 0.44, 0.72],
+    tints: [[0.66, 0.84, 1.4], [0.74, 0.9, 1.32], [0.6, 0.78, 1.46]],
+    variantStart: 14, variantCount: 6 },
+  { id: 'warlords', ko: '군웅', hanja: '群雄', en: 'Warlords',
+    banner: [0.5, 0.54, 0.6],
+    tints: [[0.88, 0.9, 1.02], [0.78, 0.82, 0.94], [1.0, 0.94, 0.92]],
+    variantStart: 20, variantCount: 4 },
 ];
+
+// 세력 경계: 보스 슬롯(3/6/9분) 약 15초 전 — 새 군세가 먼저 밀려오고(색 전환+배너),
+// 그 챔피언(보스)이 뒤이어 등장. 두 세트피스를 분리해 화면 과밀을 피한다.
+function factionForMinute(minute: number): number {
+  if (minute < 2.75) return 0;
+  if (minute < 5.75) return 1;
+  if (minute < 8.75) return 2;
+  return 3;
+}
 
 // DESIGN 5절 타임라인 스포너. 화면 밖 링에서 스폰, 시간에 따라 종류/밀도/HP 증가.
 export class Spawner {
@@ -41,6 +70,8 @@ export class Spawner {
   private eliteTimer = ELITE_INTERVAL;
   private surroundTimer = 0;
   private bossActive = false;
+  private factionIdx = 0; // 현재 세력 단계(전환 감지용)
+  onWave: ((faction: Faction) => void) | null = null; // 세력 전환 시 배너 트리거(run이 주입)
   private readonly atlas: Atlas;
   private readonly pool: EnemyPool;
   private readonly map: BattlefieldMap;
@@ -64,6 +95,7 @@ export class Spawner {
     this.eliteTimer = ELITE_INTERVAL;
     this.surroundTimer = 0;
     this.bossActive = false;
+    this.factionIdx = 0; // 시작 세력(황건)은 배너 없이 진입
   }
 
   setBossActive(v: boolean): void {
@@ -78,6 +110,12 @@ export class Spawner {
 
   update(dt: number, gameTime: number, px: number, pz: number): void {
     const minute = gameTime / 60;
+    // 세력 단계 전환 감지 → 배너 트리거(3/6/9분). 무한 모드에서는 군웅 단계 고정.
+    const fi = factionForMinute(minute);
+    if (fi !== this.factionIdx) {
+      this.factionIdx = fi;
+      this.onWave?.(FACTIONS[fi]);
+    }
     // #25 밀도 밸런스: 초반 레이트 완화(2.6→1.7/분) + 상한 25→18로 6분 스파이크 평탄화.
     let rate = Math.min(18, 2 + minute * 1.7); // 초당 스폰 수
     if (this.bossActive) rate *= 0.6; // 보스 중 소폭 감소
@@ -137,11 +175,13 @@ export class Spawner {
     let sheetId = SHEET_SOLDIERS;
     let blockPx = this.atlas.soldierBlockPx(type.charIndex);
     let blockPy = 0;
-    const m = Math.floor(minute);
-    if (m >= 1) {
+    const faction = FACTIONS[factionForMinute(minute)];
+    // 색변형 스프라이트: 세력 구간 내 무작위 → 대군에 미세한 몸체 다양성(1분 이후).
+    if (minute >= 1) {
       const variants = this.atlas.variantBlocks(type.id);
       if (variants.length > 0) {
-        const vb = variants[(m - 1) % variants.length];
+        const vi = (faction.variantStart + rng.int(faction.variantCount)) % variants.length;
+        const vb = variants[vi];
         sheetId = SHEET_VARIANTS;
         blockPx = vb.c * BLOCK_PX;
         blockPy = vb.r * 256;
@@ -152,11 +192,11 @@ export class Spawner {
       sheetId, blockPx, blockPy,
     );
     if (i < 0) return -1;
-    // 분 팔레트 미세 틴트
-    const pal = PALETTE[m % PALETTE.length];
-    this.pool.tr[i] = pal[0];
-    this.pool.tg[i] = pal[1];
-    this.pool.tb[i] = pal[2];
+    // 세력 틴트(그룹 내 무작위 → 2~3색 혼합, 응집)
+    const t = faction.tints[rng.int(faction.tints.length)];
+    this.pool.tr[i] = t[0];
+    this.pool.tg[i] = t[1];
+    this.pool.tb[i] = t[2];
     // 원거리 AI 세팅
     if (type.ranged) {
       this.pool.ranged[i] = 1;
