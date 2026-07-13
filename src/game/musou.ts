@@ -13,6 +13,7 @@ const CREST: Record<string, { char: string; r: number; g: number; b: number }> =
   zhugeliang: { char: '卦', r: 0.7, g: 1.2, b: 2.4 },
   huangzhong: { char: '弓', r: 2.2, g: 1.6, b: 0.6 },
   lvbu: { char: '戟', r: 2.4, g: 0.5, b: 0.3 },
+  sunshangxiang: { char: '香', r: 2.2, g: 0.55, b: 1.05 }, // 진홍·연분홍
   default: { char: '武', r: 1.5, g: 1.4, b: 1.0 },
 };
 
@@ -110,6 +111,7 @@ export class Musou {
       case 'zhugeliang': this.runZhuge(ctx, player); break;
       case 'huangzhong': this.runHuang(ctx, player); break;
       case 'lvbu': this.runLvbu(ctx, player); break;
+      case 'sunshangxiang': this.runSunshangxiang(ctx, player); break;
       default: this.runCommon(ctx, player); break;
     }
 
@@ -222,6 +224,33 @@ export class Musou {
       const mz = player.z + Math.sin(aa) * rr;
       ctx.effects.spawnMeteorArrow(mx, mz, 2.2, 1.6, 0.6, 0.45 + Math.random() * 0.25);
       this.aoe(ctx, mx, mz, 2.4, d * 0.7, 2);
+    }
+  }
+
+  // 손상향 홍련난무(紅蓮亂舞): 진홍 꽃잎 회전 폭풍(3방향 아크) + 주기적 방사 화살.
+  // 절제 원칙 — 아크 반경 ≤ 공통 무쌍(7), 대형 링 없음(공통 문장/광원만). 화이트아웃 금지.
+  private runSunshangxiang(ctx: WeaponContext, player: Player): void {
+    if (this.tick > 0) return;
+    this.tick = 0.1;
+    this.stormAngle += 0.7;
+    // 홍련 꽃잎: 3방향 회전 부채꼴(진홍·연분홍)
+    for (let k = 0; k < 3; k++) {
+      const a = this.stormAngle + (k / 3) * Math.PI * 2;
+      ctx.effects.spawnSlashArc(player.x, player.z, Math.cos(a), Math.sin(a), 6.5, 0.7, 2.2, 0.55, 1.05, 0.2);
+    }
+    this.aoe(ctx, player.x, player.z, 7, 62 * ctx.stats.damageMul, 4);
+    // 활 장수: 0.8s마다 방사 화살 일제사격. 아군 로즈골드(g 높여 적 진홍과 구분).
+    if (this.dashTimer <= 0) {
+      this.dashTimer = 0.8;
+      const count = 12;
+      const d = 26 * ctx.stats.damageMul;
+      for (let k = 0; k < count; k++) {
+        const a = this.stormAngle + (k / count) * Math.PI * 2;
+        ctx.projectiles.spawn(
+          player.x, player.z, Math.cos(a), Math.sin(a), 17, d, 0.5, 3, 1.5,
+          PK_ARROW, 2.3, 1.0, 0.85, 1.6, 0.55,
+        );
+      }
     }
   }
 
