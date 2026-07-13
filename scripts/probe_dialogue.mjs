@@ -5,22 +5,22 @@ const p = await b.newPage({ viewport: { width: 1280, height: 800 } });
 p.on('pageerror', e => console.log('ERR', e.message));
 await p.goto('http://localhost:5188/threesur/', { waitUntil: 'networkidle' });
 await p.waitForTimeout(700);
+console.log('타이틀 혼잣말:', await p.evaluate(() => document.querySelector('.title-quote')?.textContent || null));
 await p.screenshot({ path: OUT + '/p3_title_quote.png' });
-const tq = await p.evaluate(() => document.querySelector('.title-quote')?.textContent || null);
-console.log('타이틀 혼잣말:', tq);
 
 await p.getByText('출진 出陣', { exact: true }).click();
 await p.waitForTimeout(500);
-await p.screenshot({ path: OUT + '/p3_select_quote.png' });
 const hq = await p.evaluate(() => Array.from(document.querySelectorAll('.hero-quote')).map(e=>e.textContent));
-console.log('장수 대사 수:', hq.length, '예:', hq[0]);
+console.log('장수 대사 수:', hq.length);
+await p.screenshot({ path: OUT + '/p3_select_quote.png' });
 
-// 조운 선택 → 승리 강제 → 결과 대사
+// 조운 선택 → 잠깐 플레이 → 사망 유도 → 결과(무한 프롬프트 없음)
 await p.locator('.hero-card').first().click();
-await p.waitForTimeout(600);
-await p.evaluate(() => window.__GAME_TEST__.setTime(600));
-await p.waitForTimeout(600);
-await p.screenshot({ path: OUT + '/p3_result_quote.png' });
+await p.waitForTimeout(1200);
+await p.evaluate(() => window.__GAME_TEST__?.killPlayer?.());
+await p.waitForTimeout(1200);
+const scene = await p.evaluate(() => window.__GAME_TEST__?.scene);
 const rq = await p.evaluate(() => document.querySelector('.result-quote')?.textContent || null);
-console.log('결과 대사:', rq);
+console.log('사망 후 씬:', scene, '| 결과 대사:', rq);
+await p.screenshot({ path: OUT + '/p3_result_quote.png' });
 await b.close();
