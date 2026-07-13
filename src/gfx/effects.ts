@@ -100,6 +100,8 @@ export class EffectsSystem {
   spawnLight: ((x: number, z: number, r: number, g: number, b: number, radius: number, life: number) => void) | null = null;
   // 지면 균열 데칼 방출 (run이 DecalPool로 주입). 폭발/낙뢰 지점에 달아오른 균열.
   spawnDecal: ((x: number, z: number, radius: number, r: number, g: number, b: number) => void) | null = null;
+  // 무쌍 우선순위 광원 (run이 LightField.spawn(prio=true)로 주입). 전투 광원에 밀리지 않음.
+  spawnMusouLight: ((x: number, z: number, r: number, g: number, b: number, radius: number, life: number) => void) | null = null;
 
   constructor(scene: Scene) {
     this.scene = scene;

@@ -349,6 +349,8 @@ export class Run {
     this.zones.spawnLight = (x, z, r, g, b, radius, life) =>
       this.lightField.spawn(x, 0.5, z, r, g, b, radius, life);
     this.effects.spawnDecal = (x, z, radius, r, g, b) => this.decals.spawn(x, z, radius, r, g, b);
+    this.effects.spawnMusouLight = (x, z, r, g, b, radius, life) =>
+      this.lightField.spawn(x, 0.8, z, r, g, b, radius, life, true);
 
     // 피격/사망 데미지 비네트 (붉은 방사형)
     this.damageFlash = document.createElement('div');
