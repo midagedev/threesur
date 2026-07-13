@@ -95,7 +95,8 @@ interface LandmarkType {
 
 // WORLD_ASSETS: tower=2, palisade=3, siegeWreck=4, camp=5, warDrum=6, beacon=11
 const LANDMARK_TYPES: LandmarkType[] = [
-  { kind: 11, width: 3.2, height: 5.4, name: '봉화대 烽火', glow: 2.8, gr: 1.7, gg: 0.85, gb: 0.32 },
+  // 랜드마크는 배경 — 밀집 전투에서 적을 가리지 않게 발광 반경·강도 하향(감사 #27).
+  { kind: 11, width: 3.2, height: 5.4, name: '봉화대 烽火', glow: 1.6, gr: 1.05, gg: 0.52, gb: 0.2 },
   { kind: 5, width: 5.4, height: 4.0, name: '군영 軍營', glow: 0, gr: 0, gg: 0, gb: 0 },
   { kind: 6, width: 3.0, height: 3.4, name: '전고 戰鼓', glow: 1.7, gr: 1.0, gg: 0.38, gb: 0.26 },
   { kind: 2, width: 3.4, height: 5.6, name: '망루 望樓', glow: 0, gr: 0, gg: 0, gb: 0 },
