@@ -7,6 +7,7 @@ import { ACHIEVEMENT_BY_ID, ACHIEVEMENTS } from '../data/achievements';
 import { anyRandomLine, dialogueSelect } from '../data/dialogue';
 import { heroUnlockText, isHeroUnlocked } from '../data/heroUnlocks';
 import { WEAPON_UNLOCK_ORDER, isWeaponUnlocked, weaponUnlockText } from '../data/weaponUnlocks';
+import { MASTERWORK_DEFS, masterworkName, masterworkDesc, masterworkLore, isMasterworkOwned, ownedMasterworks } from '../data/relics';
 import { t, getLang, toggleLang, onLangChange, nameOf, WEAPON_DESC_EN, ACH_EN, HERO_BONUS_EN, HERO_MUSOU_EN } from '../core/i18n';
 import { openSharePreview } from './shareCard';
 import type { SaveData } from '../core/save';
@@ -531,6 +532,24 @@ export class Screens {
       evoGrid.appendChild(cell);
     }
     wrap.appendChild(evoGrid);
+
+    // 명기(名器) 도감 — 보스 드랍 양성 아이템 (DESIGN 14.2). 획득분은 효과+감정문, 미획득은 실루엣+이름/한자.
+    const mwOwned = ownedMasterworks(save).length;
+    wrap.appendChild(el('div', 'controls-hint', `${en ? 'Masterworks' : '명기 도감'} 名器 (${mwOwned}/${MASTERWORK_DEFS.length})`));
+    const mwGrid = el('div', 'mw-grid');
+    for (const d of MASTERWORK_DEFS) {
+      const owned = isMasterworkOwned(d.id, save);
+      const cell = el('div', owned ? 'mw-cell owned' : 'mw-cell locked');
+      cell.appendChild(el('div', 'mw-name', `${masterworkName(d)} <span class="mh">${d.hanja}</span>`));
+      if (owned) {
+        cell.appendChild(el('div', 'mw-desc', masterworkDesc(d)));
+        cell.appendChild(el('div', 'mw-lore', `“${masterworkLore(d)}”`));
+      } else {
+        cell.appendChild(el('div', 'mw-state', en ? 'Undiscovered' : '未得'));
+      }
+      mwGrid.appendChild(cell);
+    }
+    wrap.appendChild(mwGrid);
 
     // 업적 목록 (이름/설명 언어별, 한자 공통)
     const earned = save.achievements ?? [];

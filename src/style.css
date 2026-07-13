@@ -480,6 +480,65 @@ canvas {
   box-shadow: 0 0 18px rgba(255, 154, 60, 0.22);
 }
 
+/* 명기(名器) 도감 — 보스 드랍 양성 아이템 (DESIGN 14.2) */
+.mw-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+.mw-cell {
+  padding: 10px 12px;
+  border: 1px solid #2b2f39;
+  border-radius: 10px;
+  background: rgba(12, 13, 19, 0.7);
+  text-align: left;
+}
+.mw-cell.owned {
+  border-color: #6b5a2e;
+  background: rgba(24, 22, 12, 0.72);
+  box-shadow: 0 0 14px rgba(232, 198, 103, 0.12);
+}
+.mw-cell.locked {
+  opacity: 0.5;
+  border-style: dashed;
+}
+.mw-cell .mw-name {
+  font-size: 14.5px;
+  color: #f0e4c0;
+}
+.mw-cell.locked .mw-name {
+  color: #6b7080;
+}
+.mw-cell .mw-name .mh {
+  font-size: 12px;
+  color: #cbb46a;
+  margin-left: 4px;
+}
+.mw-cell.locked .mw-name .mh {
+  color: #565b68;
+}
+.mw-cell .mw-desc {
+  font-size: 11.5px;
+  color: #d8dae2;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.mw-cell .mw-lore {
+  font-size: 11px;
+  color: #9aa39a;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(232, 198, 103, 0.14);
+  line-height: 1.5;
+}
+.mw-cell .mw-state {
+  font-size: 11px;
+  color: #7f8496;
+  margin-top: 4px;
+  letter-spacing: 1px;
+}
+
 /* 업적 목록 */
 .ach-grid {
   display: grid;
@@ -843,7 +902,8 @@ canvas {
   .hero-grid,
   .codex-grid,
   .ach-grid,
-  .wpn-grid {
+  .wpn-grid,
+  .mw-grid {
     grid-template-columns: repeat(2, 1fr);
   }
   .records {
