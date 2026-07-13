@@ -1,6 +1,7 @@
 import { Scene } from 'three';
 import type { Atlas } from '../gfx/atlas';
 import type { CameraRig } from '../gfx/camera';
+import { Cinematics } from '../gfx/cinematics';
 import type { Input } from '../core/input';
 import { Ground } from '../gfx/ground';
 import { BattlefieldWorld } from '../gfx/worldKit';
@@ -108,6 +109,7 @@ export class Run {
   readonly scene = new Scene();
 
   private readonly rig: CameraRig;
+  private readonly cinematics: Cinematics;
   private readonly input: Input;
   private readonly atlas: Atlas;
 
@@ -206,6 +208,7 @@ export class Run {
   constructor(atlas: Atlas, rig: CameraRig, input: Input, hooks: RunHooks, touch = false) {
     this.atlas = atlas;
     this.rig = rig;
+    this.cinematics = new Cinematics(rig);
     this.input = input;
     this.hooks = hooks;
     this.hud = new Hud(touch);
@@ -260,7 +263,7 @@ export class Run {
     this.boss = new Boss(atlas, (name, hanja) => {
       this.hud.banner(`${name} 등장 ${hanja}`, '#e85c4a', 44, 1800);
       this.sayHero();
-      this.rig.cinematic(-0.12); // 보스 등장 시네마틱 줌인
+      // 보스 방향 팬은 checkBossSpawn → cinematics.onBossSpawn에서 처리
       audio.sfx('bossHorn');
       audio.playBgm('boss');
     });
@@ -460,6 +463,7 @@ export class Run {
     this.objects.reset();
     this.map.reset();
     this.gateBreachFx.reset();
+    this.cinematics.reset();
     this.gateRushTimer = 0;
     this.hulaoAt = 420 + rng.range(0, 120); // 7~9분 사이 호로관 세트피스 1회
     this.playerWallHits = 0;
@@ -584,10 +588,18 @@ export class Run {
     }
     if (this.state === 'paused') return;
 
+    // 시네마틱(보스 등장 팬) 스킵: 이동/Space 입력 시
+    if (
+      this.cinematics.wantsSkipInput &&
+      (this.input.move.x !== 0 || this.input.move.z !== 0 || this.input.isDown('Space'))
+    ) {
+      this.cinematics.skip();
+    }
+
     // 무쌍 발동
     if (this.input.consumePressed('Space') && this.musou.activate()) {
       this.rig.addTrauma(0.5);
-      this.rig.cinematic(-0.16); // 시네마틱 줌인
+      this.cinematics.onMusouStart();
       this.flashScreen(0.35);
     }
 
@@ -626,8 +638,7 @@ export class Run {
       this.effects.spawnThrust(dpx, dpz, ddx, ddz, 6, 2.0, 0.7, 1.4, 2.2, 0.22);
       this.effects.spawnFlash(dpx, dpz, 0.8, 1.4, 2.2, 2.2);
       for (let d = 0; d < 6; d++) this.particles.dust(dpx - ddx * d * 0.4, dpz - ddz * d * 0.4);
-      this.rig.cinematic(-0.06);
-      this.rig.punchFov(1.5);
+      this.cinematics.onDash();
       audio.sfx('warn');
     }
 
@@ -714,7 +725,7 @@ export class Run {
     this.ctx.dt = dt;
     const preMusouX = this.player.x;
     const preMusouZ = this.player.z;
-    this.musou.update(dt, this.ctx, this.player);
+    if (this.musou.update(dt, this.ctx, this.player)) this.cinematics.onMusouEnd();
     this.map.resolveMovement(
       preMusouX, preMusouZ, this.player.x, this.player.z, this.player.radius, this.moveOut,
     );
@@ -734,6 +745,11 @@ export class Run {
     if (this.frameKills >= 8) {
       this.hitstop(30, 0.08);
       this.rig.addTrauma(0.35);
+    }
+    // 대량 퇴치 킬캠 (12킬+ 단일 프레임 → 슬로모 모먼트, 쿨다운은 cinematics가 관리)
+    if (this.frameKills >= 12) {
+      this.cinematics.onMassKill(this.frameKills);
+      this.hitstop(160, 0.4);
     }
 
     // 픽업
@@ -766,6 +782,7 @@ export class Run {
     }
     this.rig.setThreat(Math.min(1, near / 45));
     this.rig.setLookAhead(this.player.velX, this.player.velZ, this.player.speedFrac);
+    this.cinematics.update(dt); // 시네마틱 포즈를 rig에 밀어넣은 뒤 rig.update
     this.rig.update(dt, this.player.x, this.player.z);
 
     if (this.gateRushTimer > 0) {
@@ -825,16 +842,31 @@ export class Run {
 
   private checkBossSpawn(): void {
     if (this.boss.active) return;
+    let spawned = false;
     if (!this.bossFlags.b3 && this.gameTime >= 180) {
       this.bossFlags.b3 = true;
       this.boss.spawn('yuanshao', this.gameTime / 60, this.ctx, this.player.x, this.player.z);
+      spawned = true;
     } else if (!this.bossFlags.b6 && this.gameTime >= 360) {
       this.bossFlags.b6 = true;
       this.boss.spawn('dongzhuo', this.gameTime / 60, this.ctx, this.player.x, this.player.z);
+      spawned = true;
     } else if (!this.bossFlags.b9 && this.gameTime >= 540) {
       this.bossFlags.b9 = true;
       this.boss.spawn('lvbu', this.gameTime / 60, this.ctx, this.player.x, this.player.z);
+      spawned = true;
     }
+    if (spawned && this.boss.idx >= 0) {
+      this.cinematics.onBossSpawn(
+        this.enemies.x[this.boss.idx] - this.player.x,
+        this.enemies.z[this.boss.idx] - this.player.z,
+      );
+    }
+  }
+
+  // 보스 처치 PiP 리플레이 트리거를 main이 소비(→ pipeline.playReplay).
+  consumeReplayTrigger(): boolean {
+    return this.cinematics.consumeReplayTrigger();
   }
 
   private renderSprites(): void {
@@ -986,6 +1018,7 @@ export class Run {
       this.treasure.spawn(x, z, true);
       this.hitstop(120, 0.05);
       this.rig.addTrauma(0.9);
+      this.cinematics.onBossDeath(x - this.player.x, z - this.player.z);
       this.flashScreen(0.4);
       this.hud.banner('討伐', '#e8c667', 90, 1600);
       audio.sfx('levelup');

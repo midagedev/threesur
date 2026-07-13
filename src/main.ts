@@ -201,6 +201,7 @@ loadAtlas()
       run.update(dt);
       if (scene === 'run') joystick.setMusou(run.musouGauge, run.musouReadyFlag);
       pipeline.setMusou(run.musouStrength, run.renderTime);
+      if (scene === 'run' && run.consumeReplayTrigger()) pipeline.playReplay();
       renderer.info.reset();
       pipeline.render();
       input.endFrame();
