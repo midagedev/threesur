@@ -1,0 +1,21 @@
+import { chromium } from '@playwright/test';
+const OUT = '/private/tmp/claude-501/-Users-hckim-repo-threesur/f67b1df0-c534-4e0e-b241-c49ac5531400/scratchpad';
+const b = await chromium.launch({ args: ['--use-angle=metal'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+const errs = [];
+p.on('pageerror', (e) => errs.push(e.message));
+await p.goto('http://localhost:5188/threesur/', { waitUntil: 'networkidle' });
+await p.waitForTimeout(1500);
+const hook = (fn, ...a) => p.evaluate(({ fn, a }) => window.__GAME_TEST__[fn](...a), { fn, a });
+const stats = () => p.evaluate(() => window.__GAME_TEST__.stats);
+const clr = async () => { for (let i = 0; i < 80; i++) { const s = await stats(); if (s.state !== 'levelup') break; await p.keyboard.press('Digit1'); await p.waitForTimeout(40); } };
+await hook('selectHero', 'guanyu');
+await hook('setTime', 430);
+await clr();
+await hook('setInvulnerable', 300);
+await p.waitForTimeout(220);
+await clr();
+for (let i = 0; i < 6; i++) { await p.waitForTimeout(55); await p.screenshot({ path: `${OUT}/hitcap_${i}.png` }); }
+const s = await stats();
+console.log(JSON.stringify({ alive: s.alive, errs: errs.slice(0, 4) }));
+await b.close();
