@@ -69,6 +69,73 @@ const MusouShader = {
   `,
 };
 
+// PostFX 팩 (#21): 단일 풀스크린 패스.
+//  - 이벤트: 방향성/라디얼 모션 블러(대시/무쌍/킬캠), 색수차 펄스(폭발/피격)
+//  - 상시: 필름 그레인, 비네트 브리딩, 은은한 톤 그레이딩
+// OutputPass 전(선형 HDR)에서 동작 — MusouShader와 동일 위치. 모바일은 블러 생략.
+const PostFxShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uTime: { value: 0 },
+    uBlur: { value: 0 },
+    uBlurDir: { value: new Vector2(0, 0) },
+    uAberr: { value: 0 },
+    uMobile: { value: 0 },
+    uRes: { value: new Vector2(1, 1) },
+    uGrain: { value: 0.05 },
+    uVig: { value: 0.26 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float uTime;
+    uniform float uBlur;
+    uniform vec2 uBlurDir;
+    uniform float uAberr;
+    uniform float uMobile;
+    uniform vec2 uRes;
+    uniform float uGrain;
+    uniform float uVig;
+    varying vec2 vUv;
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    void main() {
+      vec2 uv = vUv;
+      vec2 c = uv - 0.5;
+      vec3 col;
+      // 방향성/라디얼 모션 블러 (이벤트 시, 데스크톱만)
+      if (uBlur > 0.002 && uMobile < 0.5) {
+        vec2 dir = (c * 0.9 + uBlurDir * 1.5) * uBlur * 0.055;
+        vec3 acc = vec3(0.0);
+        for (int i = 0; i < 6; i++) {
+          acc += texture2D(tDiffuse, uv - dir * (float(i) / 5.0)).rgb;
+        }
+        col = acc / 6.0;
+      } else {
+        col = texture2D(tDiffuse, uv).rgb;
+      }
+      // 색수차 펄스 (이벤트): R/B 반경 오프셋
+      if (uAberr > 0.002) {
+        vec2 off = c * uAberr * 0.02;
+        col.r = texture2D(tDiffuse, uv + off).r;
+        col.b = texture2D(tDiffuse, uv - off).b;
+      }
+      // 톤 그레이딩: 아주 미세한 온기(HDR 안전한 곱 연산만)
+      col *= vec3(1.025, 1.0, 0.985);
+      // 비네트 브리딩 (상시, 느린 맥동)
+      float breathe = uVig + 0.05 * sin(uTime * 0.7);
+      float vig = 1.0 - smoothstep(0.45, 0.98, length(c)) * breathe;
+      col *= vig;
+      // 필름 그레인 (상시, 애니메이션)
+      float g = hash(uv * uRes + fract(uTime) * 91.7);
+      col += (g - 0.5) * uGrain;
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+};
+
 // PiP 슬로모 리플레이 (실험 #14): 저해상도 프레임 링버퍼 → 보스 처치 후 우하단 재생.
 // 캔버스→캔버스 blit로 GPU에 유지(CPU 리드백 없음). 데스크톱에서만 활성.
 const PIP_W = 320; // 캡처 해상도
@@ -81,6 +148,7 @@ export class RenderPipeline {
   readonly composer: EffectComposer;
   readonly bloom: UnrealBloomPass;
   readonly musouPass: ShaderPass;
+  readonly postPass: ShaderPass;
   private readonly renderer: WebGLRenderer;
   private readonly bloomScale: number;
 
@@ -122,6 +190,14 @@ export class RenderPipeline {
 
     this.musouPass = new ShaderPass(MusouShader);
     this.composer.addPass(this.musouPass);
+
+    // PostFX 팩(#21): 모션 블러/색수차/그레인/비네트/그레이딩. 모바일 감쇠.
+    this.postPass = new ShaderPass(PostFxShader);
+    const mob = isMobile();
+    this.postPass.uniforms.uMobile.value = mob ? 1 : 0;
+    this.postPass.uniforms.uGrain.value = mob ? 0.02 : 0.035;
+    (this.postPass.uniforms.uRes.value as Vector2).set(window.innerWidth, window.innerHeight);
+    this.composer.addPass(this.postPass);
 
     this.composer.addPass(new OutputPass());
 
@@ -214,6 +290,15 @@ export class RenderPipeline {
     this.musouPass.uniforms.uTime.value = time;
   }
 
+  // PostFX(#21): 모션 블러 강도/방향 + 색수차 강도 + 시간(상시 그레인·비네트 구동).
+  setPostFx(blur: number, blurX: number, blurZ: number, aberr: number, time: number): void {
+    const u = this.postPass.uniforms;
+    u.uBlur.value = blur;
+    (u.uBlurDir.value as Vector2).set(blurX, blurZ);
+    u.uAberr.value = aberr;
+    u.uTime.value = time;
+  }
+
   setSize(w: number, h: number): void {
     const dpr = maxDpr();
     this.renderer.setPixelRatio(dpr);
@@ -221,6 +306,7 @@ export class RenderPipeline {
     this.composer.setPixelRatio(dpr);
     this.composer.setSize(w, h);
     this.bloom.setSize(w * this.bloomScale, h * this.bloomScale);
+    (this.postPass.uniforms.uRes.value as Vector2).set(w, h);
   }
 
   render(): void {
