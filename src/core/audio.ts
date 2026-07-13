@@ -28,6 +28,7 @@ type SfxKind =
   | 'warn' // 전장 이벤트 경고
   | 'fever' // 콤보 피버 진입
   | 'explosion' // 화약통/유성 착탄
+  | 'heartbeat' // 저체력 심박
   | 'achievement'; // 업적 달성
 
 interface BgmVoice {
@@ -309,6 +310,11 @@ class AudioSystem {
         // 저역 펀치 + 노이즈 (폭발)
         this.playThud(t);
         this.playHit(t);
+        break;
+      case 'heartbeat':
+        // 낮고 부드러운 "lub-dub" 이중 박동 (저체력)
+        this.playBlip(t, 70, 0.09, 'sine', 0.18);
+        this.playBlip(t + 0.13, 58, 0.11, 'sine', 0.14);
         break;
       case 'achievement':
         // 밝은 3화음 공 (업적)

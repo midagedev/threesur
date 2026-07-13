@@ -33,6 +33,7 @@ export class Hud {
   private readonly goldEl: HTMLDivElement;
   private readonly xpFill: HTMLDivElement;
   private readonly hpFill: HTMLDivElement;
+  private readonly hpDelay: HTMLDivElement; // 피격 시 뒤따라 줄어드는 흰 잔상 바
   private readonly hpText: HTMLDivElement;
   private readonly musouWrap: HTMLDivElement;
   private readonly musouFill: HTMLDivElement;
@@ -185,9 +186,14 @@ export class Hud {
     const hpBar = document.createElement('div');
     hpBar.style.cssText =
       'width:min(60vw,420px);height:16px;background:rgba(20,22,30,0.85);border:1px solid rgba(232,198,103,0.35);border-radius:5px;overflow:hidden;position:relative;';
+    // 잔상 바(피격 시 흰 띠가 지연되며 따라 줄어듦) — 실제 HP 바 뒤에 깔린다.
+    this.hpDelay = document.createElement('div');
+    this.hpDelay.style.cssText =
+      'position:absolute;left:0;top:0;height:100%;width:100%;background:rgba(255,225,210,0.7);transition:width 0.45s ease-out 0.14s;';
+    hpBar.appendChild(this.hpDelay);
     this.hpFill = document.createElement('div');
     this.hpFill.style.cssText =
-      'height:100%;width:100%;background:linear-gradient(90deg,#c0362b,#e85c4a);box-shadow:0 0 8px rgba(232,92,74,0.6);transition:width 0.12s;';
+      'position:absolute;left:0;top:0;height:100%;width:100%;background:linear-gradient(90deg,#c0362b,#e85c4a);box-shadow:0 0 8px rgba(232,92,74,0.6);transition:width 0.12s;';
     hpBar.appendChild(this.hpFill);
     this.hpText = document.createElement('div');
     this.hpText.style.cssText =
@@ -344,7 +350,9 @@ export class Hud {
     this.levelEl.textContent = `Lv ${s.level}`;
     this.goldEl.textContent = `⟡ ${Math.floor(s.gold)}`;
     this.xpFill.style.width = `${Math.min(100, (s.xp / s.nextXp) * 100)}%`;
-    this.hpFill.style.width = `${Math.max(0, (s.hp / s.maxHp) * 100)}%`;
+    const hpPct = Math.max(0, (s.hp / s.maxHp) * 100);
+    this.hpFill.style.width = `${hpPct}%`;
+    this.hpDelay.style.width = `${hpPct}%`;
     this.hpText.textContent = `${Math.ceil(s.hp)} / ${Math.round(s.maxHp)}`;
 
     // 무쌍 (모바일은 우측 버튼이 담당 → 하단 바 미갱신)

@@ -355,9 +355,42 @@ export class Run {
       'pointer-events:none',
       'opacity:0',
       'z-index:30',
-      'background:radial-gradient(ellipse at center, rgba(0,0,0,0) 40%, rgba(180,30,24,0.85) 100%)',
+      'background:radial-gradient(ellipse at center, rgba(0,0,0,0) 28%, rgba(200,26,20,0.98) 100%)',
     ].join(';');
     document.body.appendChild(this.damageFlash);
+
+    // 저체력 상시 비네트 (30% 이하, 은은한 붉은 맥동 — 심박과 동기)
+    this.lowHpVignette = document.createElement('div');
+    this.lowHpVignette.style.cssText = [
+      'position:fixed',
+      'inset:0',
+      'pointer-events:none',
+      'opacity:0',
+      'z-index:29',
+      'transition:opacity 0.25s linear',
+      'background:radial-gradient(ellipse at center, rgba(0,0,0,0) 45%, rgba(150,10,10,0.9) 100%)',
+    ].join(';');
+    document.body.appendChild(this.lowHpVignette);
+  }
+
+  private readonly lowHpVignette: HTMLDivElement;
+  private lowHpBeat = 0;
+
+  // 저체력(30% 이하) 상시 붉은 비네트 + 심박 사운드. 낮을수록 진하고 빠르게.
+  private updateLowHp(dt: number): void {
+    const frac = this.player.hp / Math.max(1, this.player.maxHp);
+    if (frac < 0.3 && this.state === 'play' && !this.player.dead) {
+      const intensity = (0.3 - frac) / 0.3;
+      this.lowHpVignette.style.opacity = (0.32 + 0.42 * intensity).toFixed(2);
+      this.lowHpBeat -= dt;
+      if (this.lowHpBeat <= 0) {
+        this.lowHpBeat = 0.5 + 0.5 * (frac / 0.3);
+        audio.sfx('heartbeat');
+      }
+    } else if (this.lowHpVignette.style.opacity !== '0') {
+      this.lowHpVignette.style.opacity = '0';
+      this.lowHpBeat = 0;
+    }
   }
 
   private flashDamage(peak: number, durationMs: number): void {
@@ -418,6 +451,8 @@ export class Run {
     this.markers.reset();
     this.lightField.reset();
     this.decals.reset();
+    this.lowHpVignette.style.opacity = '0';
+    this.lowHpBeat = 0;
     this.spawner.reset();
     this.combo.reset();
     this.musou.reset();
@@ -715,6 +750,7 @@ export class Run {
     this.effects.update(dt);
     this.lightField.update(dt);
     this.decals.update(dt);
+    this.updateLowHp(dt);
     this.particles.update(dt);
     this.damageText.update(dt);
     this.gateBreachFx.update(dt);
@@ -897,9 +933,10 @@ export class Run {
       }
     }
     if (maxDmg > 0 && this.player.takeDamage(maxDmg * 0.5)) {
-      this.hitstop(70, 0.05);
-      this.rig.addTrauma(0.5);
-      this.flashDamage(0.45, 320);
+      this.hitstop(90, 0.05);
+      this.rig.addTrauma(0.65);
+      this.flashDamage(0.68, 360);
+      this.player.hurtFlash();
       this.musou.addHit();
       audio.sfx('playerHit');
     }
@@ -907,8 +944,10 @@ export class Run {
 
   private readonly onPlayerHit = (dmg: number): boolean => {
     if (this.player.takeDamage(dmg)) {
-      this.rig.addTrauma(0.4);
-      this.flashDamage(0.4, 300);
+      this.hitstop(90, 0.05);
+      this.rig.addTrauma(0.62);
+      this.flashDamage(0.6, 340);
+      this.player.hurtFlash();
       this.musou.addHit();
       audio.sfx('playerHit');
     }

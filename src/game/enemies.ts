@@ -50,6 +50,7 @@ export class EnemyPool {
   readonly frame = new Uint8Array(ENEMY_CAP);
   readonly animTime = new Float32Array(ENEMY_CAP);
   readonly flash = new Float32Array(ENEMY_CAP);
+  readonly hitPunch = new Float32Array(ENEMY_CAP); // 피격 스케일 펀치(1→0, 순간 팽창)
   readonly alive = new Uint8Array(ENEMY_CAP);
   // 틴트 (엘리트/보스/분팔레트 강조)
   readonly tr = new Float32Array(ENEMY_CAP);
@@ -134,6 +135,7 @@ export class EnemyPool {
     this.frame[i] = 0;
     this.animTime[i] = Math.random() * 0.5;
     this.flash[i] = 0;
+    this.hitPunch[i] = 0;
     this.tr[i] = 1;
     this.tg[i] = 1;
     this.tb[i] = 1;
@@ -199,6 +201,7 @@ export class EnemyPool {
     }
     this.hp[i] -= dmg;
     this.flash[i] = 1;
+    this.hitPunch[i] = 1; // 타격감: 순간 스케일 팽창
     return this.hp[i] <= 0;
   }
 
@@ -263,6 +266,11 @@ export class EnemyPool {
       if (this.flash[i] > 0) {
         this.flash[i] -= dt * FLASH_DECAY;
         if (this.flash[i] < 0) this.flash[i] = 0;
+      }
+      // 피격 스케일 펀치 감쇠 (~0.11s)
+      if (this.hitPunch[i] > 0) {
+        this.hitPunch[i] -= dt * 9;
+        if (this.hitPunch[i] < 0) this.hitPunch[i] = 0;
       }
 
       const xi = this.x[i];
@@ -502,7 +510,7 @@ export class EnemyPool {
       r.push(
         this.x[i],
         this.z[i],
-        this.scale[i],
+        this.scale[i] * (1 + 0.18 * this.hitPunch[i]),
         uv.u,
         uv.v,
         this.flash[i],

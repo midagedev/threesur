@@ -69,6 +69,12 @@ export class Player {
   invuln = 0;
   musouInvuln = false; // 무쌍 중 완전 무적
   private flash = 0;
+  private hurtT = 0; // 피격 붉은 틴트 타이머
+
+  // 피격 순간 붉은 틴트 플래시(run이 호출).
+  hurtFlash(): void {
+    this.hurtT = 0.32;
+  }
   private dir = 0;
   private frame = 0;
   private animTime = 0;
@@ -336,6 +342,21 @@ export class Player {
       this.flash -= dt * FLASH_DECAY;
       if (this.flash < 0) this.flash = 0;
     }
+    // 피격 붉은 틴트 + 무적 시간 깜빡임(가시성)
+    if (this.hurtT > 0) this.hurtT -= dt;
+    let tr = 1;
+    let tg = 1;
+    let tb = 1;
+    if (this.hurtT > 0) {
+      const h = this.hurtT / 0.32;
+      tg = 1 - 0.62 * h;
+      tb = 1 - 0.62 * h;
+    }
+    if (this.invuln > 0) {
+      const blink = 0.6 + 0.4 * (Math.sin(this.time * 34) > 0 ? 1 : 0);
+      tr *= blink; tg *= blink; tb *= blink;
+    }
+    this.quad.setTint(tr, tg, tb);
     // 사당 임시 버프 만료 → 스탯 재계산 (스탯 버프만 재계산 필요)
     if (this.buffAttackT > 0 || this.buffSpeedT > 0 || this.buffMusouT > 0) {
       const a0 = this.buffAttackT > 0;

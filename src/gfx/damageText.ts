@@ -8,6 +8,9 @@ interface TextSlot {
   life: number;
   dur: number;
   active: boolean;
+  base: number; // 기본 스케일(팝 배수 적용 전)
+  crit: boolean;
+  bx: number; // 등장 x
 }
 
 const CV_W = 128;
@@ -38,7 +41,7 @@ export class DamageText {
       sprite.visible = false;
       sprite.renderOrder = 10;
       scene.add(sprite);
-      this.slots.push({ sprite, mat, tex, ctx, life: 0, dur: 0.75, active: false });
+      this.slots.push({ sprite, mat, tex, ctx, life: 0, dur: 0.75, active: false, base: 1.25, crit: false, bx: 0 });
     }
   }
 
@@ -58,9 +61,11 @@ export class DamageText {
     ctx.fillText(text, CV_W / 2, CV_H / 2);
     s.tex.needsUpdate = true;
 
-    const scale = crit ? 1.9 : 1.25;
-    s.sprite.scale.set(scale * (CV_W / CV_H), scale, 1);
-    s.sprite.position.set(x + (Math.random() * 0.5 - 0.25), y, z);
+    s.base = crit ? 1.9 : 1.25;
+    s.crit = crit;
+    s.bx = x + (Math.random() * 0.7 - 0.35); // 연속 히트 산개
+    s.sprite.scale.set(s.base * (CV_W / CV_H), s.base, 1);
+    s.sprite.position.set(s.bx, y, z);
     s.sprite.visible = true;
     s.life = crit ? 0.95 : 0.75;
     s.dur = s.life;
@@ -78,7 +83,15 @@ export class DamageText {
         s.sprite.visible = false;
         continue;
       }
+      const age = s.dur - s.life;
       const t = 1 - s.life / s.dur;
+      // 등장 팝: 1.4배에서 ~0.08s 만에 정착
+      const pop = 1 + 0.4 * Math.exp(-age / 0.06);
+      const sc = s.base * pop;
+      s.sprite.scale.set(sc * (CV_W / CV_H), sc, 1);
+      // 크리티컬은 초반 좌우로 살짝 흔들림
+      const shake = s.crit ? Math.sin(age * 60) * 0.12 * Math.exp(-age / 0.12) : 0;
+      s.sprite.position.x = s.bx + shake;
       s.sprite.position.y += dt * 1.8;
       s.mat.opacity = 1 - t * t;
     }

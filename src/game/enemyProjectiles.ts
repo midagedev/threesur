@@ -49,6 +49,9 @@ export class EnemyProjectilePool {
   private readonly colAttr: InstancedBufferAttribute;
   private readonly kindAttr: InstancedBufferAttribute;
   private readonly spriteBatches: RetroProjectileBatch[];
+  // 적탄 지면 위험 표식: 붉은 점 그림자로 위치를 바닥에 항상 찍는다(피할 대상이 제일 잘 보이게).
+  private readonly dots: InstancedMesh;
+  private readonly dotArr: Float32Array;
 
   constructor(scene: Scene) {
     for (let i = 0; i < CAP; i++) this.free[i] = CAP - 1 - i;
@@ -97,8 +100,8 @@ export class EnemyProjectilePool {
             b = smoothstep(1.0, 0.0, r) * pulse;
           }
           if (b <= 0.01) discard;
-          // 도트 본체가 먼저 읽히도록 HDR 후광은 얇게만 남긴다.
-          gl_FragColor = vec4(vColor * b * 0.18, b * 0.2);
+          // 적탄은 "피해야 할 대상" — 후광을 아군보다 또렷하게(0.42) 태워 위험을 강조.
+          gl_FragColor = vec4(vColor * b * 0.42, b * 0.34);
         }
       `,
       transparent: true,
@@ -114,6 +117,41 @@ export class EnemyProjectilePool {
     this.mesh.renderOrder = 4;
     this.matArr = this.mesh.instanceMatrix.array as Float32Array;
     scene.add(this.mesh);
+
+    // 붉은 지면 위험 점(애디티브). 적탄 위치를 바닥에 항상 표기.
+    const dotGeo = new PlaneGeometry(1, 1);
+    dotGeo.rotateX(-Math.PI / 2);
+    const dotMat = new ShaderMaterial({
+      uniforms: { uTime: { value: 0 } },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        varying vec2 vUv;
+        void main() {
+          float r = length(vUv - 0.5) * 2.0;
+          if (r > 1.0) discard;
+          float ring = smoothstep(1.0, 0.55, r) * smoothstep(0.15, 0.5, r); // 링
+          float core = smoothstep(0.4, 0.0, r) * 0.6;
+          float pulse = 0.75 + 0.25 * sin(uTime * 9.0);
+          float b = (ring + core) * pulse;
+          gl_FragColor = vec4(vec3(2.2, 0.15, 0.12) * b, b * 0.7);
+        }
+      `,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      depthTest: true,
+    });
+    this.dots = new InstancedMesh(dotGeo, dotMat, CAP);
+    this.dots.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.dots.frustumCulled = false;
+    this.dots.count = 0;
+    this.dots.renderOrder = 1; // 지면
+    this.dotArr = this.dots.instanceMatrix.array as Float32Array;
+    scene.add(this.dots);
     this.spriteBatches = [
       new RetroProjectileBatch(scene, 'enemy-arrow', CAP, 5, 0.92), // 기본 궁수: 깔끔한 단발 화살
       new RetroProjectileBatch(scene, 'enemy-orb', CAP, 5, 0.92), // 책사 마탄: 어두운 구체(플레이어 부적과 구분)
@@ -182,7 +220,8 @@ export class EnemyProjectilePool {
         this.size[i] = 1.18; this.radius[i] = 0.45; this.turn[i] = 1.35;
         break;
       case EK_LIGHTNING:
-        this.cr[i] = 0.62; this.cg[i] = 1.45; this.cb[i] = 2.75;
+        // 적 = 위험(자마젠타). 아군 청백 낙뢰와 확실히 구분.
+        this.cr[i] = 1.9; this.cg[i] = 0.55; this.cb[i] = 2.55;
         this.size[i] = 1.5; this.radius[i] = 0.38; this.turn[i] = 0;
         break;
       case EK_HEAVY:
@@ -190,7 +229,8 @@ export class EnemyProjectilePool {
         this.size[i] = 1.7; this.radius[i] = 0.65; this.turn[i] = 0;
         break;
       default:
-        this.cr[i] = 2.15; this.cg[i] = 0.9; this.cb[i] = 0.48;
+        // 적 기본 궁수 = 진홍(아군 금색 화살과 구분).
+        this.cr[i] = 2.5; this.cg[i] = 0.5; this.cb[i] = 0.38;
         this.size[i] = 1.3; this.radius[i] = 0.3; this.turn[i] = 0;
         break;
     }
@@ -254,6 +294,7 @@ export class EnemyProjectilePool {
 
   render(time: number): void {
     (this.mesh.material as ShaderMaterial).uniforms.uTime.value = time;
+    (this.dots.material as ShaderMaterial).uniforms.uTime.value = time;
     for (const batch of this.spriteBatches) batch.begin(time);
     let w = 0;
     for (let i = 0; i < CAP; i++) {
@@ -294,12 +335,24 @@ export class EnemyProjectilePool {
       this.spriteBatches[this.kind[i]].push(
         this.x[i], 1.055, this.z[i], theta, artScaleX, artScaleZ, 1,
       );
+      // 붉은 지면 위험 점(투사체보다 살짝 크게, 위치 표기)
+      const dm = w * 16;
+      const dsize = (this.radius[i] + 0.55) * 2;
+      this.dotArr[dm] = dsize;
+      this.dotArr[dm + 5] = 1;
+      this.dotArr[dm + 10] = dsize;
+      this.dotArr[dm + 12] = this.x[i];
+      this.dotArr[dm + 13] = 0.05;
+      this.dotArr[dm + 14] = this.z[i];
+      this.dotArr[dm + 15] = 1;
       w++;
     }
     this.mesh.count = w;
     this.mesh.instanceMatrix.needsUpdate = true;
     this.colAttr.needsUpdate = true;
     this.kindAttr.needsUpdate = true;
+    this.dots.count = w;
+    this.dots.instanceMatrix.needsUpdate = true;
     for (const batch of this.spriteBatches) batch.end();
   }
 }
