@@ -21,6 +21,7 @@ export interface SaveData {
   bosses: string[]; // 처치한 보스 type id 목록 (도감)
   achievements: string[]; // 달성한 업적 id 목록 (누적)
   unlockedWeapons: string[]; // 해금된 병법(무기) id 목록 (도감·토스트 캐시, 조건에서 파생)
+  masterworks: string[]; // 획득한 명기(名器) id 목록 (도감 획득 이력, 누적)
   totalKills: number; // 누적 처치 수 (업적 판정용)
   totalWins: number; // 누적 승리 수
 }
@@ -36,6 +37,7 @@ function fresh(): SaveData {
     bosses: [],
     achievements: [],
     unlockedWeapons: [],
+    masterworks: [],
     totalKills: 0,
     totalWins: 0,
   };
@@ -80,6 +82,7 @@ function migrate(data: unknown): SaveData {
     bosses: Array.isArray(d.bosses) ? d.bosses.filter((x) => typeof x === 'string') : [],
     achievements: Array.isArray(d.achievements) ? d.achievements.filter((x) => typeof x === 'string') : [],
     unlockedWeapons: Array.isArray(d.unlockedWeapons) ? d.unlockedWeapons.filter((x) => typeof x === 'string') : [],
+    masterworks: Array.isArray(d.masterworks) ? d.masterworks.filter((x) => typeof x === 'string') : [],
     totalKills: numOr(d.totalKills, 0),
     totalWins: numOr(d.totalWins, 0),
   };

@@ -6,7 +6,7 @@ import type { Input } from '../core/input';
 import type { HeroDef } from '../data/heroes';
 import { CELL_W } from '../data/spriteManifest';
 import { PASSIVE_BY_ID } from '../data/passives';
-import { RELIC_BY_ID } from '../data/relics';
+import { RELIC_BY_ID, MASTERWORK_BY_ID } from '../data/relics';
 import type { MetaMods } from '../data/upgrades';
 
 export type BuffKind = 'attack' | 'speed' | 'musou';
@@ -57,6 +57,7 @@ export class Player {
   hero: HeroDef;
   private meta: MetaMods | null = null; // 메타 상점 영구 강화 (런 시작 시 세팅)
   private relicIds: string[] = []; // 보유 저주 유물
+  private masterworkIds: string[] = []; // 명기(양성, 보스 드랍 — 상한 없음)
   private curPassives: Record<string, number> = {}; // 마지막 재계산에 쓴 패시브(버프 만료 재계산용)
   private buffAttackT = 0; // 사당 공격 버프 잔여(초)
   private buffSpeedT = 0; // 사당 이속 버프 잔여
@@ -206,6 +207,11 @@ export class Player {
       const r = RELIC_BY_ID[id];
       if (r) r.apply(s);
     }
+    // 명기(보스 드랍 양성 유물)
+    for (const id of this.masterworkIds) {
+      const m = MASTERWORK_BY_ID[id];
+      if (m) m.apply(s);
+    }
     // 사당 임시 버프
     if (this.buffAttackT > 0) s.damageMul *= 1.3;
     if (this.buffSpeedT > 0) s.speedMul *= 1.25;
@@ -219,6 +225,12 @@ export class Player {
   }
   get relicCount(): number {
     return this.relicIds.length;
+  }
+
+  addMasterwork(id: string): void {
+    if (this.masterworkIds.includes(id)) return;
+    this.masterworkIds.push(id);
+    this.recomputeStats(this.curPassives);
   }
 
   // 사당 30초 버프 적용. attack/speed는 스탯, musou는 게이지 충전 배수(run이 읽음).
@@ -244,6 +256,7 @@ export class Player {
     this.x = 0;
     this.z = 0;
     this.relicIds = [];
+    this.masterworkIds = [];
     this.buffAttackT = 0;
     this.buffSpeedT = 0;
     this.buffMusouT = 0;
