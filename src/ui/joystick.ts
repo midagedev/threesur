@@ -108,9 +108,9 @@ export class Joystick {
     this.musouBtn.appendChild(core);
     document.body.appendChild(this.musouBtn);
 
-    // 이벤트 바인딩 (Pointer Events)
-    this.moveZone.addEventListener('pointerdown', this.onMoveDown);
-    this.moveZone.addEventListener('pointermove', this.onMoveMove);
+    // 이벤트 바인딩 (Pointer Events). passive:false로 preventDefault 보장(iOS 스크롤/줌 개입 차단).
+    this.moveZone.addEventListener('pointerdown', this.onMoveDown, { passive: false });
+    this.moveZone.addEventListener('pointermove', this.onMoveMove, { passive: false });
     this.moveZone.addEventListener('pointerup', this.onMoveUp);
     this.moveZone.addEventListener('pointercancel', this.onMoveUp);
     this.moveZone.addEventListener('lostpointercapture', this.onMoveUp);
@@ -151,8 +151,15 @@ export class Joystick {
   }
 
   private readonly onMoveDown = (e: PointerEvent): void => {
-    if (this.movePointer !== -1) return;
     e.preventDefault();
+    // 마지막 터치가 이긴다: 이전 추적 포인터가 남아 있어도 새 터치로 교체 → 스턱으로 인한 활성화 실패 원천 제거.
+    if (this.movePointer !== -1 && this.movePointer !== e.pointerId) {
+      try {
+        this.moveZone.releasePointerCapture(this.movePointer);
+      } catch {
+        /* ignore */
+      }
+    }
     this.movePointer = e.pointerId;
     this.startX = e.clientX;
     this.startY = e.clientY;
