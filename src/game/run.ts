@@ -11,6 +11,8 @@ import { ParticleSystem } from '../gfx/particles';
 import { DamageText } from '../gfx/damageText';
 import { Labels } from '../gfx/labels';
 import { MarkerLayer } from '../gfx/markers';
+import { LightField } from '../gfx/lightField';
+import { DecalPool } from '../gfx/decals';
 import { Player } from './player';
 import { EnemyPool, ENEMY_CAP, SHEET_SGRADE, SHEET_APRIORITY } from './enemies';
 import { Spawner } from './spawner';
@@ -118,6 +120,8 @@ export class Run {
   private readonly apriorityR: InstancedSpriteRenderer;
   private readonly shadowR: ShadowRenderer;
   private readonly effects: EffectsSystem;
+  private readonly lightField: LightField;
+  private readonly decals: DecalPool;
   private readonly particles: ParticleSystem;
   private readonly damageText: DamageText;
   private readonly labels: Labels;
@@ -206,13 +210,15 @@ export class Run {
     this.hooks = hooks;
     this.hud = new Hud(touch);
 
-    this.ground = new Ground(this.scene);
+    this.lightField = new LightField(touch);
+    const lu = this.lightField.uniforms();
+    this.ground = new Ground(this.scene, lu);
     this.map.update(0, 0, 0);
     this.world = new BattlefieldWorld(this.scene, this.map);
-    this.soldiersR = new InstancedSpriteRenderer(atlas.soldiers, ENEMY_CAP);
-    this.variantsR = new InstancedSpriteRenderer(atlas.variants, ENEMY_CAP);
-    this.sgradeR = new InstancedSpriteRenderer(atlas.sgrade, 48);
-    this.apriorityR = new InstancedSpriteRenderer(atlas.apriority, 48);
+    this.soldiersR = new InstancedSpriteRenderer(atlas.soldiers, ENEMY_CAP, lu);
+    this.variantsR = new InstancedSpriteRenderer(atlas.variants, ENEMY_CAP, lu);
+    this.sgradeR = new InstancedSpriteRenderer(atlas.sgrade, 48, lu);
+    this.apriorityR = new InstancedSpriteRenderer(atlas.apriority, 48, lu);
     this.shadowR = new ShadowRenderer(ENEMY_CAP + 2);
     this.scene.add(
       this.soldiersR.mesh,
@@ -223,21 +229,22 @@ export class Run {
     );
 
     this.effects = new EffectsSystem(this.scene);
+    this.decals = new DecalPool(this.scene);
     this.particles = new ParticleSystem(this.scene);
     this.damageText = new DamageText(this.scene);
     this.labels = new Labels(this.scene);
     this.markers = new MarkerLayer(this.scene);
     this.gateBreachFx = new GateBreachFx(this.scene);
     this.gems = new GemPool(this.scene);
-    this.projectiles = new ProjectilePool(this.scene);
+    this.projectiles = new ProjectilePool(this.scene, lu);
     this.zones = new ZonePool(this.scene);
     this.enemyProj = new EnemyProjectilePool(this.scene);
     this.treasure = new TreasurePool(this.scene);
 
-    this.player = new Player(atlas, this.hero);
+    this.player = new Player(atlas, this.hero, lu);
     this.player.setRimScale(touch ? 0.5 : 1); // 모바일 저해상도 블룸에서 림 과다 방지
     this.scene.add(this.player.mesh);
-    this.companion = new Companion(this.scene, atlas);
+    this.companion = new Companion(this.scene, atlas, lu);
     this.spawner = new Spawner(atlas, this.enemies, this.map);
     this.weapons = [createWeapon(this.hero.startWeapon)];
 
@@ -334,6 +341,11 @@ export class Run {
 
     // 낙뢰 화면 미세 플래시 훅
     this.effects.screenFlash = (i: number) => this.flashScreen(i);
+    this.effects.spawnLight = (x, z, r, g, b, radius, life) =>
+      this.lightField.spawn(x, 0.6, z, r, g, b, radius, life);
+    this.zones.spawnLight = (x, z, r, g, b, radius, life) =>
+      this.lightField.spawn(x, 0.5, z, r, g, b, radius, life);
+    this.effects.spawnDecal = (x, z, radius, r, g, b) => this.decals.spawn(x, z, radius, r, g, b);
 
     // 피격/사망 데미지 비네트 (붉은 방사형)
     this.damageFlash = document.createElement('div');
@@ -404,6 +416,8 @@ export class Run {
     this.treasure.reset();
     this.labels.reset();
     this.markers.reset();
+    this.lightField.reset();
+    this.decals.reset();
     this.spawner.reset();
     this.combo.reset();
     this.musou.reset();
@@ -699,6 +713,8 @@ export class Run {
     if (fever && !this.feverWasOn) audio.sfx('fever');
     this.feverWasOn = fever;
     this.effects.update(dt);
+    this.lightField.update(dt);
+    this.decals.update(dt);
     this.particles.update(dt);
     this.damageText.update(dt);
     this.gateBreachFx.update(dt);
@@ -793,6 +809,7 @@ export class Run {
       this.atlas, this.soldiersR, this.variantsR, this.sgradeR, this.apriorityR, this.shadowR,
     );
     this.shadowR.end();
+    this.decals.render();
     this.gems.render();
     this.projectiles.render(this.renderTime);
     this.zones.render(this.renderTime);

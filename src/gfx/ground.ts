@@ -14,6 +14,7 @@ import {
   Color,
   Vector3,
 } from 'three';
+import { LIGHT_PARS_FRAG, LIGHT_PARS_VERT, type LightUniforms } from './lightField';
 
 const PLANE_SIZE = 420;
 const REPEAT = 42;
@@ -29,7 +30,7 @@ export class Ground {
   private readonly fireflyMat: ShaderMaterial;
   private time = 0;
 
-  constructor(scene: Scene) {
+  constructor(scene: Scene, light: LightUniforms) {
     scene.fog = new FogExp2(0x05060a, 0.017);
 
     this.tex = makeGroundTexture();
@@ -40,6 +41,22 @@ export class Ground {
     const geo = new PlaneGeometry(PLANE_SIZE, PLANE_SIZE, 1, 1);
     geo.rotateX(-Math.PI / 2);
     const mat = new MeshBasicMaterial({ map: this.tex, toneMapped: true });
+    // 언릿 지면이 동적 광원 필드를 받도록 셰이더에 라이트 항을 주입(파이프라인은 그대로 유지).
+    mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, light);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>\n${LIGHT_PARS_VERT}`)
+        .replace(
+          '#include <project_vertex>',
+          '#include <project_vertex>\n  vWorldXZ = (modelMatrix * vec4(transformed, 1.0)).xz;',
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${LIGHT_PARS_FRAG}`)
+        .replace(
+          '#include <tonemapping_fragment>',
+          '  gl_FragColor.rgb += sampleLights() * 1.35;\n#include <tonemapping_fragment>',
+        );
+    };
     this.plane = new Mesh(geo, mat);
     this.plane.renderOrder = -1;
     scene.add(this.plane);

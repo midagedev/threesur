@@ -47,6 +47,10 @@ export class EffectsSystem {
 
   // 낙뢰 시 화면 미세 플래시 (run이 주입)
   screenFlash: ((intensity: number) => void) | null = null;
+  // 동적 광원 방출 (run이 LightField로 주입). 폭발/낙뢰/킬 순간 지면·적을 실제로 비춘다.
+  spawnLight: ((x: number, z: number, r: number, g: number, b: number, radius: number, life: number) => void) | null = null;
+  // 지면 균열 데칼 방출 (run이 DecalPool로 주입). 폭발/낙뢰 지점에 달아오른 균열.
+  spawnDecal: ((x: number, z: number, radius: number, r: number, g: number, b: number) => void) | null = null;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -210,6 +214,11 @@ export class EffectsSystem {
     s.mesh.scale.setScalar(maxRadius * 0.15);
     (s.mat.uniforms.uColor.value as Color).setRGB(r, g, b);
     s.mat.uniforms.uT.value = 0;
+    // 큰 충격파/폭발만 지면을 밝히고 균열을 남긴다(작은 타격 링은 제외).
+    if (maxRadius >= 3) {
+      if (this.spawnLight) this.spawnLight(x, z, r, g, b, maxRadius * 1.8, dur * 0.7);
+      if (this.spawnDecal) this.spawnDecal(x, z, maxRadius * 1.15, r, g, b);
+    }
   }
 
   // 킬/대시 순간 광점(발광 원반). 짧게 확장하며 페이드.
@@ -225,6 +234,7 @@ export class EffectsSystem {
     s.mesh.scale.setScalar(radius * 0.6);
     (s.mat.uniforms.uColor.value as Color).setRGB(r, g, b);
     s.mat.uniforms.uT.value = 0;
+    if (this.spawnLight) this.spawnLight(x, z, r, g, b, radius * 1.6, 0.12 + radius * 0.02);
   }
 
   // 낙뢰 볼트 (세로) + 착지 링 + 화면 미세 플래시.
@@ -242,6 +252,8 @@ export class EffectsSystem {
     s.mat.uniforms.uT.value = 0;
     this.spawnRing(x, z, 2.2, r * 0.8, g * 0.8, b, 0.4);
     if (this.screenFlash) this.screenFlash(0.16);
+    if (this.spawnLight) this.spawnLight(x, z, r, g, b, 9, 0.3);
+    if (this.spawnDecal) this.spawnDecal(x, z, 3.2, r, g, b);
   }
 
   // 연쇄 번개 (적→적).

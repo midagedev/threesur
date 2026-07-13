@@ -1,4 +1,5 @@
 import type { Atlas } from '../gfx/atlas';
+import type { LightUniforms } from '../gfx/lightField';
 import { cellUvOffset } from '../gfx/atlas';
 import { SpriteQuad, dirFromVelocity } from '../gfx/sprites';
 import type { Input } from '../core/input';
@@ -110,10 +111,10 @@ export class Player {
   private readonly atlas: Atlas;
   private readonly uv = { u: 0, v: 0 };
 
-  constructor(atlas: Atlas, hero: HeroDef) {
+  constructor(atlas: Atlas, hero: HeroDef, light: LightUniforms) {
     this.atlas = atlas;
     this.hero = hero;
-    this.quad = new SpriteQuad(atlas.sgrade);
+    this.quad = new SpriteQuad(atlas.sgrade, light);
     this.quad.setPlayer(true); // 군중 속 가독성용 림 글로우 활성
     this.baseSpeed = hero.baseSpeed;
     this.baseHp = hero.baseHp;

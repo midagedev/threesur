@@ -1,5 +1,6 @@
 import type { Scene } from 'three';
 import type { Atlas, SheetInfo } from '../gfx/atlas';
+import type { LightUniforms } from '../gfx/lightField';
 import { cellUvOffset } from '../gfx/atlas';
 import { SpriteQuad, dirFromVelocity } from '../gfx/sprites';
 import { CELL_W } from '../data/spriteManifest';
@@ -31,9 +32,9 @@ export class Companion {
   private attackTimer = 0;
   private readonly uv = { u: 0, v: 0 };
 
-  constructor(scene: Scene, atlas: Atlas) {
+  constructor(scene: Scene, atlas: Atlas, light: LightUniforms) {
     this.sheet = atlas.sgrade;
-    this.quad = new SpriteQuad(this.sheet, 2.15);
+    this.quad = new SpriteQuad(this.sheet, light, 2.15);
     this.quad.setTint(0.78, 1.08, 1.35);
     this.quad.mesh.visible = false;
     scene.add(this.quad.mesh);

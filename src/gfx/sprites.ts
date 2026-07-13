@@ -14,6 +14,7 @@ import {
   Color,
 } from 'three';
 import type { SheetInfo } from './atlas';
+import { LIGHT_PARS_FRAG, LIGHT_PARS_VERT, type LightUniforms } from './lightField';
 
 import { ELEVATION } from './camera';
 
@@ -57,12 +58,14 @@ const VERT_INSTANCED = /* glsl */ `
   varying vec2 vCellLo;
   varying float vFlash;
   varying vec3 vTint;
+  ${LIGHT_PARS_VERT}
   ${FOG_PARS_V}
   void main() {
     vUv = aUvOffset + uv * uCellUv;
     vCellLo = aUvOffset;
     vFlash = aFlash;
     vTint = aTint;
+    vWorldXZ = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz;
     vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
     vFogDepth = -mv.z;
     gl_Position = projectionMatrix * mv;
@@ -92,9 +95,11 @@ const VERT_SINGLE = /* glsl */ `
   uniform vec2 uCellUv;
   uniform vec2 uUvOffset;
   varying vec2 vUv;
+  ${LIGHT_PARS_VERT}
   ${FOG_PARS_V}
   void main() {
     vUv = uUvOffset + uv * uCellUv;
+    vWorldXZ = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz;
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
     vFogDepth = -mv.z;
     gl_Position = projectionMatrix * mv;
@@ -109,6 +114,7 @@ const FRAG_INSTANCED = /* glsl */ `
   varying float vFlash;
   varying vec3 vTint;
   ${EDGE_GLSL}
+  ${LIGHT_PARS_FRAG}
   ${FOG_PARS_F}
   void main() {
     vec4 tex = texture2D(uMap, vUv);
@@ -116,6 +122,7 @@ const FRAG_INSTANCED = /* glsl */ `
     vec3 col = pow(tex.rgb, vec3(2.2)) * vTint * ${AMBIENT_LIFT.toFixed(3)};
     // 디매팅 프린지 → 어두운 아웃라인으로 눌러 밝은 테두리 제거
     col *= mix(1.0, 0.32, edgeFactor(vUv, vCellLo));
+    col += sampleLights() * 0.75; // 폭발/낙뢰가 적을 실제로 비춤
     col = mix(col, vec3(2.0), vFlash); // 피격 화이트 플래시(HDR로 블룸)
     float fog = 1.0 - exp(-uFogDensity * uFogDensity * vFogDepth * vFogDepth);
     col = mix(col, uFogColor, clamp(fog, 0.0, 1.0));
@@ -132,6 +139,7 @@ const FRAG_SINGLE = /* glsl */ `
   uniform float uRim; // 플레이어 림 강도(모바일 저해상도 블룸 대응으로 낮춤)
   varying vec2 vUv;
   ${EDGE_GLSL}
+  ${LIGHT_PARS_FRAG}
   ${FOG_PARS_F}
   void main() {
     vec4 tex = texture2D(uMap, vUv);
@@ -142,6 +150,7 @@ const FRAG_SINGLE = /* glsl */ `
     // 플레이어: 금색 림(군중 속 구분) / 그 외(보스): 다크 아웃라인
     vec3 rim = mix(col * 0.32, vec3(1.9, 1.35, 0.55) * uRim, 0.8);
     col = mix(col, mix(col * 0.32, rim, uPlayer), edge);
+    col += sampleLights() * 0.6;
     col = mix(col, vec3(2.0), uFlash);
     float fog = 1.0 - exp(-uFogDensity * uFogDensity * vFogDepth * vFogDepth);
     col = mix(col, uFogColor, clamp(fog, 0.0, 1.0));
@@ -168,7 +177,7 @@ export class InstancedSpriteRenderer {
   private readonly tintAttr: InstancedBufferAttribute;
   private w = 0;
 
-  constructor(sheet: SheetInfo, max: number) {
+  constructor(sheet: SheetInfo, max: number, light: LightUniforms) {
     const geo = makeUnitSpriteGeometry();
     this.uvArr = new Float32Array(max * 2);
     this.flashArr = new Float32Array(max);
@@ -188,6 +197,7 @@ export class InstancedSpriteRenderer {
         uMap: { value: sheet.texture },
         uCellUv: { value: new Vector2(sheet.cellUvW, sheet.cellUvH) },
         uTexel: { value: new Vector2(1 / sheet.texW, 1 / sheet.texH) },
+        ...light,
         ...fogUniforms(),
       },
       vertexShader: VERT_INSTANCED,
@@ -256,7 +266,7 @@ export class SpriteQuad {
   private readonly mat: ShaderMaterial;
   private readonly worldH: number;
 
-  constructor(sheet: SheetInfo, worldH = SPRITE_WORLD_H) {
+  constructor(sheet: SheetInfo, light: LightUniforms, worldH = SPRITE_WORLD_H) {
     this.worldH = worldH;
     this.mat = new ShaderMaterial({
       uniforms: {
@@ -268,6 +278,7 @@ export class SpriteQuad {
         uTint: { value: new Color(1, 1, 1) },
         uPlayer: { value: 0 },
         uRim: { value: 1 },
+        ...light,
         ...fogUniforms(),
       },
       vertexShader: VERT_SINGLE,

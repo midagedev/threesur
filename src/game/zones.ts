@@ -39,6 +39,8 @@ export class ZonePool {
   private readonly fadeArr: Float32Array;
   private readonly colAttr: InstancedBufferAttribute;
   private readonly fadeAttr: InstancedBufferAttribute;
+  // 화염 장판이 주변을 일렁이며 비추도록 동적 광원 방출 (run이 LightField로 주입).
+  spawnLight: ((x: number, z: number, r: number, g: number, b: number, radius: number, life: number) => void) | null = null;
 
   constructor(scene: Scene) {
     for (let i = 0; i < CAP; i++) this.free[i] = CAP - 1 - i;
@@ -176,6 +178,11 @@ export class ZonePool {
       }
       // 상승 불꽃 (프레임당 확률적, 풀 부담·블룸 억제)
       if (Math.random() < 0.22) particles.fireEmber(this.x[i], this.z[i], this.radius[i] * 0.8);
+      // 일렁이는 화염 광원(짧은 수명으로 매 프레임 갱신 → 깜빡임)
+      if (this.spawnLight && Math.random() < 0.55) {
+        const fl = 0.35 + Math.random() * 0.3;
+        this.spawnLight(this.x[i], this.z[i], this.cr[i] * fl, this.cg[i] * fl, this.cb[i] * fl, this.radius[i] * 2.0, 0.14);
+      }
       this.tickT[i] -= dt;
       if (this.tickT[i] > 0) continue;
       this.tickT[i] = TICK;

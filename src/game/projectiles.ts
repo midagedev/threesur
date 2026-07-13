@@ -13,6 +13,8 @@ import type { DamageText } from '../gfx/damageText';
 import type { ParticleSystem } from '../gfx/particles';
 import type { EffectsSystem } from '../gfx/effects';
 import { RetroProjectileBatch } from '../gfx/projectileSprites';
+import { ArrowMeshBatch } from '../gfx/meshProjectiles';
+import type { LightUniforms } from '../gfx/lightField';
 
 const CAP = 384;
 const HITMAX = 8; // 관통 시 중복 타격 방지용 최근 타격 목록 크기
@@ -68,8 +70,9 @@ export class ProjectilePool {
   private readonly kindAttr: InstancedBufferAttribute;
   private readonly fadeAttr: InstancedBufferAttribute;
   private readonly spriteBatches: RetroProjectileBatch[];
+  private readonly arrows: ArrowMeshBatch;
 
-  constructor(scene: Scene) {
+  constructor(scene: Scene, light: LightUniforms) {
     for (let i = 0; i < CAP; i++) this.free[i] = CAP - 1 - i;
     this.freeTop = CAP;
 
@@ -177,6 +180,8 @@ export class ProjectilePool {
       new RetroProjectileBatch(scene, 'cavalry', CAP),
       new RetroProjectileBatch(scene, 'player-arrow', CAP), // 원융노 화염 화살
     ];
+    // 화살 계열은 스프라이트 대신 진짜 3D 메시로(부피감 + 광원 수광).
+    this.arrows = new ArrowMeshBatch(scene, CAP, light);
   }
 
   get object(): InstancedMesh {
@@ -438,6 +443,7 @@ export class ProjectilePool {
   render(time: number): void {
     (this.mesh.material as ShaderMaterial).uniforms.uTime.value = time;
     for (const batch of this.spriteBatches) batch.begin(time);
+    this.arrows.begin();
     let w = 0;
     for (let i = 0; i < CAP; i++) {
       if (this.alive[i] === 0) continue;
@@ -490,11 +496,18 @@ export class ProjectilePool {
           ? Math.max(this.len[i], this.wid[i])
           : this.len[i] * 1.18;
       const isArrow = this.kind[i] === PK_ARROW || this.kind[i] === PK_FIRE_ARROW;
-      const artScaleX = isArrow ? this.len[i] * 1.22 : artScale;
-      const artScaleZ = isArrow ? this.wid[i] * 1.18 : artScale;
-      this.spriteBatches[this.kind[i]].push(
-        this.x[i], this.hy[i] + 0.055, this.z[i], theta, artScaleX, artScaleZ, fade,
-      );
+      if (isArrow) {
+        // 3D 화살 메시: 스프라이트 본체를 대체(후광 쿼드는 유지).
+        this.arrows.push(
+          this.x[i], this.hy[i] + 0.2, this.z[i], theta,
+          this.len[i] * 1.05, Math.max(this.wid[i], 0.5) * 1.05,
+          this.cr[i], this.cg[i], this.cb[i], fade,
+        );
+      } else {
+        this.spriteBatches[this.kind[i]].push(
+          this.x[i], this.hy[i] + 0.055, this.z[i], theta, artScale, artScale, fade,
+        );
+      }
       w++;
     }
     this.mesh.count = w;
@@ -503,6 +516,7 @@ export class ProjectilePool {
     this.kindAttr.needsUpdate = true;
     this.fadeAttr.needsUpdate = true;
     for (const batch of this.spriteBatches) batch.end();
+    this.arrows.end();
   }
 }
 
