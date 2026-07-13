@@ -52,6 +52,7 @@ loadAtlas()
       touch,
     );
     const pipeline = new RenderPipeline(renderer, run.scene, rig.camera);
+    run.setPostFx(pipeline); // PostFX 순간 펄스(#21) 주입
     const joystick = new Joystick(input);
 
     const screens = new Screens({

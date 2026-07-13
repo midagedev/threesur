@@ -111,6 +111,8 @@ export class Run {
 
   private readonly rig: CameraRig;
   private readonly cinematics: Cinematics;
+  // PostFX 순간 펄스(#21) — main이 RenderPipeline을 주입. 상시/무쌍 파생은 postfx.ts가 자체 구동.
+  private postfx: { pulseBlur(s: number, dx?: number, dz?: number): void; pulseAberration(s: number): void } | null = null;
   private readonly input: Input;
   private readonly atlas: Atlas;
 
@@ -603,6 +605,7 @@ export class Run {
     if (this.input.consumePressed('Space') && this.musou.activate()) {
       this.rig.addTrauma(0.5);
       this.cinematics.onMusouStart();
+      this.postfx?.pulseAberration(0.7);
       this.flashScreen(0.35);
     }
 
@@ -642,6 +645,7 @@ export class Run {
       this.effects.spawnFlash(dpx, dpz, 0.8, 1.4, 2.2, 2.2);
       for (let d = 0; d < 6; d++) this.particles.dust(dpx - ddx * d * 0.4, dpz - ddz * d * 0.4);
       this.cinematics.onDash();
+      this.postfx?.pulseBlur(0.8, ddx, ddz);
       audio.sfx('warn');
     }
 
@@ -752,6 +756,7 @@ export class Run {
     // 대량 퇴치 킬캠 (12킬+ 단일 프레임 → 슬로모 모먼트, 쿨다운은 cinematics가 관리)
     if (this.frameKills >= 12) {
       this.cinematics.onMassKill(this.frameKills);
+      this.postfx?.pulseBlur(0.6);
       this.hitstop(160, 0.4);
     }
 
@@ -872,6 +877,10 @@ export class Run {
     return this.cinematics.consumeReplayTrigger();
   }
 
+  setPostFx(fx: { pulseBlur(s: number, dx?: number, dz?: number): void; pulseAberration(s: number): void }): void {
+    this.postfx = fx;
+  }
+
   private renderSprites(): void {
     this.shadowR.begin();
     if (this.state !== 'attract') this.shadowR.push(this.player.x, this.player.z, this.player.radius * 1.6);
@@ -972,6 +981,7 @@ export class Run {
       this.rig.addTrauma(0.65);
       this.flashDamage(0.68, 360);
       this.player.hurtFlash();
+      this.postfx?.pulseAberration(0.85);
       this.musou.addHit();
       audio.sfx('playerHit');
     }
@@ -983,6 +993,7 @@ export class Run {
       this.rig.addTrauma(0.62);
       this.flashDamage(0.6, 340);
       this.player.hurtFlash();
+      this.postfx?.pulseAberration(0.85);
       this.musou.addHit();
       audio.sfx('playerHit');
     }
@@ -1022,6 +1033,8 @@ export class Run {
       this.hitstop(120, 0.05);
       this.rig.addTrauma(0.9);
       this.cinematics.onBossDeath(x - this.player.x, z - this.player.z);
+      this.postfx?.pulseBlur(0.7);
+      this.postfx?.pulseAberration(1.0);
       this.flashScreen(0.4);
       this.hud.banner('討伐', '#e8c667', 90, 1600);
       audio.sfx('levelup');
@@ -1321,6 +1334,7 @@ export class Run {
 
   // 부활 충격파: 주변 적에게 대미지 + 넉백.
   private shockwave(cx: number, cz: number, radius: number, damage: number): void {
+    this.postfx?.pulseAberration(0.7);
     const en = this.enemies;
     const n = this.hash.query(cx, cz, radius, this.scratch);
     for (let c = 0; c < n; c++) {
