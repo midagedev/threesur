@@ -111,11 +111,12 @@ export class EffectsSystem {
     r = 0.7,
     g = 0.95,
     b = 1.7,
+    dur = 0.15,
   ): void {
     const s = this.thrusts[this.tCur];
     this.tCur = (this.tCur + 1) % this.thrusts.length;
     s.age = 0;
-    s.dur = 0.15;
+    s.dur = dur;
     s.active = true;
     s.mesh.visible = true;
     s.mesh.position.set(px, 1.0, pz);

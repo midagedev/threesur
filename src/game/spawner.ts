@@ -1,8 +1,18 @@
 import type { Atlas } from '../gfx/atlas';
-import { EnemyPool, SHEET_SOLDIERS, SHEET_VARIANTS, SHEET_APRIORITY } from './enemies';
+import {
+  BEHAVIOR_CASTER,
+  BEHAVIOR_CHARGE,
+  BEHAVIOR_SHIELD,
+  BEHAVIOR_VOLLEY,
+  EnemyPool,
+  SHEET_SOLDIERS,
+  SHEET_VARIANTS,
+  SHEET_APRIORITY,
+} from './enemies';
 import { ENEMY_TYPES } from '../data/enemyTypes';
 import type { EnemyType } from '../data/enemyTypes';
 import { rng } from '../core/rng';
+import type { BattlefieldMap } from './battlefieldMap';
 
 const BLOCK_PX = 192; // 4열 × 48px (variants)
 const APRIORITY_BLOCK = 4 * 48;
@@ -33,11 +43,13 @@ export class Spawner {
   private bossActive = false;
   private readonly atlas: Atlas;
   private readonly pool: EnemyPool;
+  private readonly map: BattlefieldMap;
   private readonly apriorityNames: string[];
 
-  constructor(atlas: Atlas, pool: EnemyPool) {
+  constructor(atlas: Atlas, pool: EnemyPool, map: BattlefieldMap) {
     this.atlas = atlas;
     this.pool = pool;
+    this.map = map;
     // apriority 인덱스→한글 이름
     const chars = atlas.manifest.sheets.apriority.chars;
     this.apriorityNames = new Array(16).fill('장수');
@@ -81,14 +93,16 @@ export class Spawner {
     }
 
     // 엘리트: 90초마다
-    this.eliteTimer -= dt;
-    if (this.eliteTimer <= 0) {
-      this.eliteTimer += ELITE_INTERVAL;
-      this.spawnElite(minute, px, pz);
+    if (!this.bossActive) {
+      this.eliteTimer -= dt;
+      if (this.eliteTimer <= 0) {
+        this.eliteTimer += ELITE_INTERVAL;
+        this.spawnElite(minute, px, pz);
+      }
     }
 
     // 포위 스폰 이벤트 (5분+): 20초마다 원형 대군
-    if (gameTime >= 300) {
+    if (!this.bossActive && gameTime >= 300) {
       this.surroundTimer -= dt;
       if (this.surroundTimer <= 0) {
         this.surroundTimer = 22;
@@ -102,9 +116,11 @@ export class Spawner {
     const r = rng.range(RING_MIN, RING_MAX);
     out.x = px + Math.cos(ang) * r;
     out.z = pz + Math.sin(ang) * r;
+    this.map.projectWalkable(out.x, out.z, 0.75, out);
   }
 
   private readonly _p = { x: 0, z: 0 };
+  private readonly _spawnP = { x: 0, z: 0 };
 
   private spawnOne(minute: number, px: number, pz: number): void {
     const type = this.pickType(minute);
@@ -113,6 +129,9 @@ export class Spawner {
   }
 
   private placeEnemy(type: EnemyType, x: number, z: number, minute: number): number {
+    this.map.projectWalkable(x, z, type.radius + 0.08, this._spawnP);
+    x = this._spawnP.x;
+    z = this._spawnP.z;
     const hp = type.hp * this.hpScale(minute);
     let sheetId = SHEET_SOLDIERS;
     let blockPx = this.atlas.soldierBlockPx(type.charIndex);
@@ -146,6 +165,15 @@ export class Spawner {
       this.pool.projSpeed[i] = type.projSpeed ?? 10;
       this.pool.projHoming[i] = type.projHoming ? 1 : 0;
     }
+    if (type.id === 'general_spear' || (type.id === 'runner' && rng.next() < 0.34)) {
+      this.pool.behavior[i] = BEHAVIOR_CHARGE;
+    } else if (type.id === 'general_bow') {
+      this.pool.behavior[i] = BEHAVIOR_VOLLEY;
+    } else if (type.id === 'strategist') {
+      this.pool.behavior[i] = BEHAVIOR_CASTER;
+    } else if (type.id === 'guard') {
+      this.pool.behavior[i] = BEHAVIOR_SHIELD;
+    }
     return i;
   }
 
@@ -160,11 +188,41 @@ export class Spawner {
     );
     if (i < 0) return;
     this.pool.elite[i] = 1;
+    this.pool.behavior[i] = BEHAVIOR_SHIELD;
     this.pool.tr[i] = 1.5;
     this.pool.tg[i] = 1.2;
     this.pool.tb[i] = 0.7;
     this.pool.labels[i] = `${this.apriorityNames[charIndex]} 精銳`;
     this.pool.markSpecial(i);
+  }
+
+  // 시각/회귀 테스트용으로 한 패턴을 플레이어 주변에 강제 배치한다.
+  forcePattern(name: string, gameTime: number, px: number, pz: number): void {
+    const minute = gameTime / 60;
+    if (name === 'charge') {
+      const i = this.placeEnemy(ENEMY_TYPES.general_spear, px + 8, pz, minute);
+      if (i >= 0) this.pool.patternT[i] = 0;
+    } else if (name === 'volley') {
+      for (let k = -1; k <= 1; k++) {
+        const i = this.placeEnemy(ENEMY_TYPES.general_bow, px + k * 2.2, pz + 9, minute);
+        if (i >= 0) this.pool.atkTimer[i] = 0;
+      }
+    } else if (name === 'strategist') {
+      const i = this.placeEnemy(ENEMY_TYPES.strategist, px - 8, pz + 5, minute);
+      if (i >= 0) this.pool.atkTimer[i] = 0;
+    } else if (name === 'shield') {
+      this.placeEnemy(ENEMY_TYPES.guard, px + 5, pz + 3, minute);
+    }
+  }
+
+  spawnGateRush(x: number, z: number, horizontal: boolean, minute: number): void {
+    for (let k = 0; k < 10; k++) {
+      const row = (k / 2) | 0;
+      const lane = (k % 2) * 2 - 1;
+      const sx = horizontal ? x + lane * 1.5 : x - 4 - row * 1.4;
+      const sz = horizontal ? z - 4 - row * 1.4 : z + lane * 1.5;
+      this.placeEnemy(k >= 8 ? ENEMY_TYPES.general_spear : ENEMY_TYPES.runner, sx, sz, minute);
+    }
   }
 
   private spawnSurround(minute: number, px: number, pz: number): void {

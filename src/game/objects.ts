@@ -1,14 +1,10 @@
 import {
   Scene,
-  BoxGeometry,
-  InstancedMesh,
-  InstancedBufferAttribute,
-  MeshBasicMaterial,
-  DynamicDrawUsage,
 } from 'three';
 import type { EffectsSystem } from '../gfx/effects';
 import type { ParticleSystem } from '../gfx/particles';
 import type { Rng } from '../core/rng';
+import { WorldSpriteBatch, WORLD_ASSETS } from '../gfx/worldKit';
 
 export type BuffKind = 'attack' | 'speed' | 'musou';
 
@@ -30,6 +26,7 @@ const OBJ_CAP = 32;
 const KIND_BARREL = 0;
 const KIND_DUMPLING = 1;
 const KIND_SHRINE = 2;
+const KIND_PALISADE = 3;
 const BARREL_RADIUS = 4;
 
 // 화약통(폭발·연쇄) / 만두 수레(회복) / 군신 사당(버프) 관리.
@@ -41,25 +38,11 @@ export class BattlefieldObjects {
   private readonly alive = new Uint8Array(OBJ_CAP);
   private spawnTimer = 4;
 
-  private readonly mesh: InstancedMesh;
-  private readonly matArr: Float32Array;
-  private readonly colArr: Float32Array;
-  private readonly colAttr: InstancedBufferAttribute;
+  private readonly batch: WorldSpriteBatch;
 
   constructor(scene: Scene, deps: ObjectDeps) {
     this.d = deps;
-    const geo = new BoxGeometry(0.9, 1.1, 0.9);
-    const mat = new MeshBasicMaterial({ toneMapped: false });
-    this.mesh = new InstancedMesh(geo, mat, OBJ_CAP);
-    this.mesh.instanceMatrix.setUsage(DynamicDrawUsage);
-    this.colArr = new Float32Array(OBJ_CAP * 3);
-    this.colAttr = new InstancedBufferAttribute(this.colArr, 3);
-    this.colAttr.setUsage(DynamicDrawUsage);
-    this.mesh.instanceColor = this.colAttr;
-    this.mesh.frustumCulled = false;
-    this.mesh.count = 0;
-    this.matArr = this.mesh.instanceMatrix.array as Float32Array;
-    scene.add(this.mesh);
+    this.batch = new WorldSpriteBatch(scene, OBJ_CAP);
   }
 
   reset(): void {
@@ -72,11 +55,12 @@ export class BattlefieldObjects {
     for (let i = 0; i < OBJ_CAP; i++) if (this.alive[i] === 0) { slot = i; break; }
     if (slot < 0) return;
     const r = this.d.rng;
-    // 종류 확률: 화약통 위주, 5분+ 만두, 가끔 사당
+    // 종류 확률: 전투 선택을 만드는 화약 수레/목책 위주, 5분+ 만두, 가끔 사당
     const rv = r.next();
     let kind = KIND_BARREL;
-    if (gameTime > 300 && rv < 0.25) kind = KIND_DUMPLING;
-    else if (rv < 0.15) kind = KIND_SHRINE;
+    if (gameTime > 300 && rv < 0.18) kind = KIND_DUMPLING;
+    else if (rv < 0.1) kind = KIND_SHRINE;
+    else if (rv > 0.68) kind = KIND_PALISADE;
     // 플레이어 주변 링에 배치(고정, 플레이어가 다가가 상호작용)
     const a = r.next() * Math.PI * 2;
     const dist = r.range(8, 16);
@@ -101,7 +85,7 @@ export class BattlefieldObjects {
       if (this.alive[i] === 0) continue;
       const dx = px - this.x[i];
       const dz = pz - this.z[i];
-      if (this.kind[i] === KIND_BARREL) continue; // 무기로만 터짐
+      if (this.kind[i] === KIND_BARREL || this.kind[i] === KIND_PALISADE) continue; // 무기로만 반응
       if (dx * dx + dz * dz <= cr * cr) this.interact(i);
     }
   }
@@ -122,17 +106,18 @@ export class BattlefieldObjects {
     this.alive[i] = 0;
   }
 
-  // 무기 판정 지점(x,z,r)이 화약통에 닿으면 폭발(+연쇄). 하나라도 터지면 true.
+  // 무기 판정 지점(x,z,r)이 화약 수레/목책에 닿으면 반응. 하나라도 맞으면 true.
   // TODO(통합): run이 무기 타격 지점마다 호출하거나, 오브젝트를 hash에 등록해 무기가 직접 질의.
   hitAt(x: number, z: number, r: number): boolean {
     let any = false;
     for (let i = 0; i < OBJ_CAP; i++) {
-      if (this.alive[i] === 0 || this.kind[i] !== KIND_BARREL) continue;
+      if (this.alive[i] === 0 || (this.kind[i] !== KIND_BARREL && this.kind[i] !== KIND_PALISADE)) continue;
       const dx = x - this.x[i];
       const dz = z - this.z[i];
       const rr = r + 0.7;
       if (dx * dx + dz * dz <= rr * rr) {
-        this.explode(i);
+        if (this.kind[i] === KIND_BARREL) this.explode(i);
+        else this.breakPalisade(i);
         any = true;
       }
     }
@@ -155,28 +140,36 @@ export class BattlefieldObjects {
     }
   }
 
-  render(time: number): void {
-    let w = 0;
+  private breakPalisade(i: number): void {
+    const x = this.x[i];
+    const z = this.z[i];
+    this.alive[i] = 0;
+    this.d.effects.spawnRing(x, z, 2.8, 1.6, 1.05, 0.45, 0.3);
+    this.d.particles.burst(x, z, 1.5, 0.85, 0.35, 22, 5);
+    this.d.damageArea(x, z, 2.5, 35);
+    this.d.banner('목책 돌파 木柵', '#e4a05b');
+  }
+
+  render(_time: number): void {
+    this.batch.begin();
     for (let i = 0; i < OBJ_CAP; i++) {
       if (this.alive[i] === 0) continue;
-      const m = w * 16;
-      const bob = 0.55 + Math.sin(time * 3 + i) * 0.06;
-      this.matArr[m] = 1;
-      this.matArr[m + 5] = 1;
-      this.matArr[m + 10] = 1;
-      this.matArr[m + 12] = this.x[i];
-      this.matArr[m + 13] = bob;
-      this.matArr[m + 14] = this.z[i];
-      this.matArr[m + 15] = 1;
-      const c = w * 3;
-      // 화약통=적갈색, 만두=금색, 사당=청록 발광
-      if (this.kind[i] === KIND_BARREL) { this.colArr[c] = 1.4; this.colArr[c + 1] = 0.5; this.colArr[c + 2] = 0.2; }
-      else if (this.kind[i] === KIND_DUMPLING) { this.colArr[c] = 2.4; this.colArr[c + 1] = 1.9; this.colArr[c + 2] = 0.6; }
-      else { this.colArr[c] = 0.6; this.colArr[c + 1] = 2.0; this.colArr[c + 2] = 1.8; }
-      w++;
+      if (this.kind[i] === KIND_BARREL) {
+        this.batch.push(WORLD_ASSETS.powderCart, this.x[i], this.z[i], 2.4, 2.0, 1.12);
+      } else if (this.kind[i] === KIND_DUMPLING) {
+        this.batch.push(WORLD_ASSETS.dumplingCart, this.x[i], this.z[i], 2.5, 2.1, 1.18);
+      } else if (this.kind[i] === KIND_SHRINE) {
+        this.batch.push(WORLD_ASSETS.shrine, this.x[i], this.z[i], 2.8, 3.3, 1.13);
+      } else {
+        this.batch.push(WORLD_ASSETS.palisade, this.x[i], this.z[i], 3.7, 2.15, 1.05);
+      }
     }
-    this.mesh.count = w;
-    this.mesh.instanceMatrix.needsUpdate = true;
-    this.colAttr.needsUpdate = true;
+    this.batch.end();
+  }
+
+  get visibleCount(): number {
+    let count = 0;
+    for (let i = 0; i < OBJ_CAP; i++) count += this.alive[i];
+    return count;
   }
 }

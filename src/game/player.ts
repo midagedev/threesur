@@ -253,6 +253,12 @@ export class Player {
     this.quad.setPosition(this.x, 0, this.z);
   }
 
+  setPosition(x: number, z: number): void {
+    this.x = x;
+    this.z = z;
+    this.quad.setPosition(x, 0, z);
+  }
+
   // 접촉 피해. 무적/무쌍이면 무시하고 false. 실제 적용 피해량은 stats 반영.
   takeDamage(dmg: number): boolean {
     if (this.musouInvuln || this.invuln > 0) return false;

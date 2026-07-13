@@ -256,6 +256,10 @@ loadAtlas()
       treasure: (boss?: boolean) => run.testTreasure(boss),
       // Phase 4: 전장 이벤트/유물/무한 모드
       triggerEvent: (name: string) => run.testTriggerEvent(name),
+      spawnPattern: (name: string) => run.testSpawnPattern(name),
+      setPlayerPosition: (x: number, z: number) => run.testSetPlayerPosition(x, z),
+      primeGate: () => run.testPrimeGate(),
+      breachGate: () => run.testBreachGate(),
       forceRelic: () => run.testForceRelic(),
       enterEndless: () => run.testEnterEndless(),
       get stats() {

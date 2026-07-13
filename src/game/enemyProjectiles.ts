@@ -114,6 +114,10 @@ export class EnemyProjectilePool {
     return this.mesh;
   }
 
+  get activeCount(): number {
+    return CAP - this.freeTop;
+  }
+
   reset(): void {
     this.alive.fill(0);
     for (let i = 0; i < CAP; i++) this.free[i] = CAP - 1 - i;

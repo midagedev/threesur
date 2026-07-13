@@ -1,6 +1,8 @@
 import { chromium } from '@playwright/test';
+import { mkdir } from 'node:fs/promises';
 const OUT = process.env.OUT || '/private/tmp/claude-501/-Users-hckim-repo-threesur/f67b1df0-c534-4e0e-b241-c49ac5531400/scratchpad';
-const URL = process.env.URL || 'http://localhost:5188/threesur/';
+const URL = process.env.URL || 'http://localhost:5188/';
+await mkdir(OUT, { recursive: true });
 const b = await chromium.launch({ args: ['--use-angle=metal'] });
 const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = [];
@@ -20,6 +22,7 @@ const clearLevels = async () => {
 };
 
 // 보스 없이 적만 대량 누적 (약한 무기 + 생존 패시브)
+await hook('selectHero', 'zhaoyun');
 await hook('setBossFlags', true, true, true);
 await hook('givePassive', 'armor', 5);
 await hook('givePassive', 'wine', 5);

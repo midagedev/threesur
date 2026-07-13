@@ -4,6 +4,8 @@ import type { InstancedSpriteRenderer, ShadowRenderer } from '../gfx/sprites';
 import { dirFromVelocity, SPRITE_WORLD_H } from '../gfx/sprites';
 import { SpatialHash } from './collision';
 import type { EnemyProjectilePool } from './enemyProjectiles';
+import type { EffectsSystem } from '../gfx/effects';
+import type { BattlefieldMap } from './battlefieldMap';
 import { rng } from '../core/rng';
 
 export const ENEMY_CAP = 1024;
@@ -11,6 +13,18 @@ const ANIM_FPS = 8;
 const SEP_STRENGTH = 7;
 const FLASH_DECAY = 7;
 const KB_DECAY = 8; // 넉백 속도 감쇠
+const MAX_CONCURRENT_PATTERNS = 3;
+
+export const BEHAVIOR_NONE = 0;
+export const BEHAVIOR_CHARGE = 1;
+export const BEHAVIOR_VOLLEY = 2;
+export const BEHAVIOR_CASTER = 3;
+export const BEHAVIOR_SHIELD = 4;
+
+const PATTERN_IDLE = 0;
+const PATTERN_WINDUP = 1;
+const PATTERN_ACTION = 2;
+const PATTERN_RECOVERY = 3;
 
 // 시트 ID
 export const SHEET_SOLDIERS = 0;
@@ -52,6 +66,13 @@ export class EnemyPool {
   readonly projDamage = new Float32Array(ENEMY_CAP);
   readonly projSpeed = new Float32Array(ENEMY_CAP);
   readonly projHoming = new Uint8Array(ENEMY_CAP);
+  // 읽기 쉬운 전투 패턴 FSM: 대기 → 예고 → 공격 → 빈틈.
+  readonly behavior = new Uint8Array(ENEMY_CAP);
+  readonly patternState = new Uint8Array(ENEMY_CAP);
+  readonly patternT = new Float32Array(ENEMY_CAP);
+  readonly aimX = new Float32Array(ENEMY_CAP);
+  readonly aimZ = new Float32Array(ENEMY_CAP);
+  readonly shieldHits = new Uint8Array(ENEMY_CAP);
   // 특수 개체
   readonly elite = new Uint8Array(ENEMY_CAP);
   readonly boss = new Uint8Array(ENEMY_CAP);
@@ -60,6 +81,9 @@ export class EnemyPool {
   readonly flee = new Uint8Array(ENEMY_CAP); // 1이면 플레이어 반대로 도주(보급 마차)
   readonly cart = new Uint8Array(ENEMY_CAP); // 1이면 보급 마차(처치 시 골드 대량+보물)
   readonly labels: (string | null)[] = new Array(ENEMY_CAP).fill(null);
+  chargeStarts = 0;
+  volleyStarts = 0;
+  casterStarts = 0;
 
   // 엘리트/보스 인덱스(이름표/특수 처리용). 죽은 항목은 지연 제거.
   readonly specials: number[] = [];
@@ -70,6 +94,8 @@ export class EnemyPool {
 
   private readonly cand: number[] = [];
   private readonly uv = { u: 0, v: 0 };
+  private readonly nav = { x: 0, z: 0 };
+  private readonly moved = { x: 0, z: 0 };
 
   constructor() {
     for (let i = 0; i < ENEMY_CAP; i++) this.free[i] = ENEMY_CAP - 1 - i;
@@ -114,6 +140,12 @@ export class EnemyPool {
     this.kbz[i] = 0;
     this.ranged[i] = 0;
     this.atkTimer[i] = 0.5 + Math.random();
+    this.behavior[i] = BEHAVIOR_NONE;
+    this.patternState[i] = PATTERN_IDLE;
+    this.patternT[i] = 0.8 + Math.random() * 1.8;
+    this.aimX[i] = 0;
+    this.aimZ[i] = 1;
+    this.shieldHits[i] = 0;
     this.elite[i] = 0;
     this.boss[i] = 0;
     this.controlled[i] = 0;
@@ -147,10 +179,22 @@ export class EnemyPool {
     this.freeTop = ENEMY_CAP;
     this.aliveCount = 0;
     this.specials.length = 0;
+    this.chargeStarts = 0;
+    this.volleyStarts = 0;
+    this.casterStarts = 0;
   }
 
   // 대미지 적용. 사망 시 true.
   damageAt(i: number, dmg: number): boolean {
+    if (this.behavior[i] === BEHAVIOR_SHIELD && this.patternState[i] === PATTERN_IDLE) {
+      dmg *= 0.55;
+      this.shieldHits[i]++;
+      if (this.shieldHits[i] >= 3) {
+        this.shieldHits[i] = 0;
+        this.patternState[i] = PATTERN_RECOVERY;
+        this.patternT[i] = 2.4;
+      }
+    }
     this.hp[i] -= dmg;
     this.flash[i] = 1;
     return this.hp[i] <= 0;
@@ -173,6 +217,14 @@ export class EnemyPool {
     return -1;
   }
 
+  countInsideWalls(map: BattlefieldMap): number {
+    let count = 0;
+    for (let i = 0; i < ENEMY_CAP; i++) {
+      if (this.alive[i] && map.circleBlocked(this.x[i], this.z[i], this.radius[i] * 0.9)) count++;
+    }
+    return count;
+  }
+
   insertAll(hash: SpatialHash): void {
     const alive = this.alive;
     for (let i = 0; i < ENEMY_CAP; i++) {
@@ -187,8 +239,16 @@ export class EnemyPool {
     pz: number,
     hash: SpatialHash,
     enemyProj: EnemyProjectilePool,
+    effects: EffectsSystem,
+    map: BattlefieldMap,
   ): void {
     const cand = this.cand;
+    let activePatterns = 0;
+    for (let i = 0; i < ENEMY_CAP; i++) {
+      if (this.alive[i] && (this.patternState[i] === PATTERN_WINDUP || this.patternState[i] === PATTERN_ACTION)) {
+        activePatterns++;
+      }
+    }
     for (let i = 0; i < ENEMY_CAP; i++) {
       if (this.alive[i] === 0) continue;
 
@@ -200,15 +260,18 @@ export class EnemyPool {
 
       const xi = this.x[i];
       const zi = this.z[i];
-      let dx = px - xi;
-      let dz = pz - zi;
-      const dist = Math.hypot(dx, dz) || 1;
-      dx /= dist;
-      dz /= dist;
+      const targetDx = px - xi;
+      const targetDz = pz - zi;
+      const dist = Math.hypot(targetDx, targetDz) || 1;
+      const aimDx = targetDx / dist;
+      const aimDz = targetDz / dist;
+      map.flowDirection(xi, zi, px, pz, this.nav);
+      let dx = this.nav.x;
+      let dz = this.nav.z;
 
       // 보스: 위치는 외부 제어. 애니만 갱신.
       if (this.controlled[i] === 1) {
-        this.dir[i] = dirFromVelocity(dx, dz, this.dir[i]);
+        this.dir[i] = dirFromVelocity(aimDx, aimDz, this.dir[i]);
         this.animTime[i] += dt;
         this.frame[i] = (((this.animTime[i] * ANIM_FPS) | 0) % 4) as number;
         continue;
@@ -217,8 +280,9 @@ export class EnemyPool {
       // 스턴(장비 무쌍): 이동/발사 정지, 넉백만 감쇠 적용.
       if (this.stun[i] > 0) {
         this.stun[i] -= dt;
-        this.x[i] = xi + this.kbx[i] * dt;
-        this.z[i] = zi + this.kbz[i] * dt;
+        map.resolveMovement(xi, zi, xi + this.kbx[i] * dt, zi + this.kbz[i] * dt, this.radius[i], this.moved);
+        this.x[i] = this.moved.x;
+        this.z[i] = this.moved.z;
         const kds = Math.max(0, 1 - KB_DECAY * dt);
         this.kbx[i] *= kds;
         this.kbz[i] *= kds;
@@ -230,15 +294,67 @@ export class EnemyPool {
       let vz = dz * sp;
       // 도주(보급 마차): 플레이어 반대로 빠르게. 추적/발사 로직 스킵.
       if (this.flee[i] === 1) {
-        this.x[i] = xi - dx * sp * dt;
-        this.z[i] = zi - dz * sp * dt;
+        map.resolveMovement(xi, zi, xi - dx * sp * dt, zi - dz * sp * dt, this.radius[i], this.moved);
+        this.x[i] = this.moved.x;
+        this.z[i] = this.moved.z;
         this.dir[i] = dirFromVelocity(-dx, -dz, this.dir[i]);
         this.animTime[i] += dt;
         this.frame[i] = (((this.animTime[i] * ANIM_FPS) | 0) % 4) as number;
         continue;
       }
 
-      // 원거리: 사거리 유지 + 발사
+      const behavior = this.behavior[i];
+      const state = this.patternState[i];
+
+      // 창병/돌격병: 위치를 고정해 예고한 뒤 직선으로 돌진하고 확실한 빈틈을 남긴다.
+      if (behavior === BEHAVIOR_CHARGE) {
+        this.patternT[i] -= dt;
+        if (state === PATTERN_IDLE) {
+          if (this.patternT[i] <= 0 && dist >= 4 && dist <= 12 && activePatterns < MAX_CONCURRENT_PATTERNS) {
+            this.patternState[i] = PATTERN_WINDUP;
+            this.patternT[i] = 0.68;
+            this.aimX[i] = aimDx;
+            this.aimZ[i] = aimDz;
+            effects.spawnRing(xi, zi, 2.8, 2.5, 0.35, 0.18, 0.55);
+            effects.spawnThrust(xi, zi, aimDx, aimDz, 8.5, 0.24, 2.5, 0.28, 0.14, 0.68);
+            this.flash[i] = 0.28;
+            this.chargeStarts++;
+            activePatterns++;
+          }
+        } else if (state === PATTERN_WINDUP) {
+          vx = 0;
+          vz = 0;
+          this.flash[i] = Math.max(this.flash[i], 0.16);
+          if (this.patternT[i] <= 0) {
+            this.patternState[i] = PATTERN_ACTION;
+            this.patternT[i] = 0.42;
+          }
+        } else if (state === PATTERN_ACTION) {
+          vx = this.aimX[i] * 10.5;
+          vz = this.aimZ[i] * 10.5;
+          if (this.patternT[i] <= 0) {
+            this.patternState[i] = PATTERN_RECOVERY;
+            this.patternT[i] = 0.95;
+          }
+        } else {
+          vx *= 0.12;
+          vz *= 0.12;
+          if (this.patternT[i] <= 0) {
+            this.patternState[i] = PATTERN_IDLE;
+            this.patternT[i] = 2.8 + rng.next() * 1.8;
+          }
+        }
+      }
+
+      // 방패병: 정면 개념을 과하게 만들지 않고, 3타로 깨지는 짧은 방어/그로기 리듬만 제공한다.
+      if (behavior === BEHAVIOR_SHIELD && state === PATTERN_RECOVERY) {
+        this.patternT[i] -= dt;
+        vx *= 0.35;
+        vz *= 0.35;
+        if (this.patternT[i] <= 0) this.patternState[i] = PATTERN_IDLE;
+      }
+
+      // 원거리: 사거리 유지 + 예고 후 부채꼴 일제사격/책사 마탄.
       if (this.ranged[i] === 1) {
         const r = this.range[i];
         if (dist < r * 0.6) {
@@ -248,20 +364,41 @@ export class EnemyPool {
           vx *= 0.15; // 사거리 안이면 거의 정지
           vz *= 0.15;
         }
-        this.atkTimer[i] -= dt;
-        if (this.atkTimer[i] <= 0 && dist <= r * 1.15) {
-          this.atkTimer[i] = this.atkCd[i];
-          const homing = this.projHoming[i] === 1;
-          enemyProj.spawn(
-            xi,
-            zi,
-            dx,
-            dz,
-            this.projSpeed[i],
-            this.projDamage[i],
-            homing,
-            homing ? 1 : 0,
-          );
+        if (state === PATTERN_IDLE) {
+          this.atkTimer[i] -= dt;
+          if (this.atkTimer[i] <= 0 && dist <= r * 1.15 && activePatterns < MAX_CONCURRENT_PATTERNS) {
+            this.patternState[i] = PATTERN_WINDUP;
+            this.patternT[i] = behavior === BEHAVIOR_CASTER ? 0.92 : 0.72;
+            this.aimX[i] = aimDx;
+            this.aimZ[i] = aimDz;
+            if (behavior === BEHAVIOR_CASTER) {
+              effects.spawnRing(xi, zi, 3.4, 1.5, 0.45, 2.5, 0.75);
+              this.casterStarts++;
+            } else {
+              effects.spawnRing(xi, zi, 2.8, 2.5, 1.2, 0.35, 0.55);
+              effects.spawnThrust(xi, zi, aimDx, aimDz, 10.5, 0.14, 2.4, 1.15, 0.28, 0.72);
+              this.volleyStarts++;
+            }
+            activePatterns++;
+          }
+        } else if (state === PATTERN_WINDUP) {
+          this.patternT[i] -= dt;
+          vx *= 0.05;
+          vz *= 0.05;
+          this.flash[i] = Math.max(this.flash[i], 0.12);
+          if (this.patternT[i] <= 0) {
+            this.fireFan(i, xi, zi, enemyProj, behavior === BEHAVIOR_CASTER);
+            this.patternState[i] = PATTERN_RECOVERY;
+            this.patternT[i] = behavior === BEHAVIOR_CASTER ? 0.85 : 0.6;
+          }
+        } else if (state === PATTERN_RECOVERY) {
+          this.patternT[i] -= dt;
+          vx *= 0.2;
+          vz *= 0.2;
+          if (this.patternT[i] <= 0) {
+            this.patternState[i] = PATTERN_IDLE;
+            this.atkTimer[i] = this.atkCd[i];
+          }
         }
       }
 
@@ -295,12 +432,29 @@ export class EnemyPool {
       this.kbx[i] *= kd;
       this.kbz[i] *= kd;
 
-      this.x[i] = xi + vx * dt;
-      this.z[i] = zi + vz * dt;
+      const hitWall = map.resolveMovement(xi, zi, xi + vx * dt, zi + vz * dt, ri, this.moved);
+      this.x[i] = this.moved.x;
+      this.z[i] = this.moved.z;
+      if (hitWall && behavior === BEHAVIOR_CHARGE && this.patternState[i] === PATTERN_ACTION) {
+        this.patternState[i] = PATTERN_RECOVERY;
+        this.patternT[i] = 0.95;
+        effects.spawnRing(this.x[i], this.z[i], 1.8, 2.0, 0.45, 0.18, 0.25);
+      }
 
       this.dir[i] = dirFromVelocity(vx, vz, this.dir[i]);
       this.animTime[i] += dt;
       this.frame[i] = (((this.animTime[i] * ANIM_FPS) | 0) % 4) as number;
+    }
+  }
+
+  private fireFan(i: number, x: number, z: number, enemyProj: EnemyProjectilePool, homing: boolean): void {
+    const base = Math.atan2(this.aimZ[i], this.aimX[i]);
+    const spread = homing ? 0.23 : 0.16;
+    for (let k = -1; k <= 1; k++) {
+      const a = base + spread * k;
+      enemyProj.spawn(
+        x, z, Math.cos(a), Math.sin(a), this.projSpeed[i], this.projDamage[i], homing, homing ? 1 : 0,
+      );
     }
   }
 

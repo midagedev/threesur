@@ -3,6 +3,8 @@ import type { Atlas } from '../gfx/atlas';
 import type { CameraRig } from '../gfx/camera';
 import type { Input } from '../core/input';
 import { Ground } from '../gfx/ground';
+import { BattlefieldWorld } from '../gfx/worldKit';
+import { GateBreachFx } from '../gfx/gateBreachFx';
 import { InstancedSpriteRenderer, ShadowRenderer } from '../gfx/sprites';
 import { EffectsSystem } from '../gfx/effects';
 import { ParticleSystem } from '../gfx/particles';
@@ -46,6 +48,8 @@ import { rng } from '../core/rng';
 import { audio } from '../core/audio';
 import { Companion } from './companion';
 import { pickLine } from '../data/dialogue';
+import { BattlefieldMap } from './battlefieldMap';
+import type { GateBarrier } from './battlefieldMap';
 
 type State = 'attract' | 'play' | 'levelup' | 'paused' | 'dead' | 'victory' | 'victoryChoice';
 
@@ -96,6 +100,8 @@ export class Run {
   private readonly atlas: Atlas;
 
   private readonly ground: Ground;
+  private readonly map = new BattlefieldMap();
+  private readonly world: BattlefieldWorld;
   private readonly soldiersR: InstancedSpriteRenderer;
   private readonly variantsR: InstancedSpriteRenderer;
   private readonly sgradeR: InstancedSpriteRenderer;
@@ -105,6 +111,7 @@ export class Run {
   private readonly particles: ParticleSystem;
   private readonly damageText: DamageText;
   private readonly labels: Labels;
+  private readonly gateBreachFx: GateBreachFx;
 
   private readonly player: Player;
   private readonly companion: Companion;
@@ -158,6 +165,11 @@ export class Run {
   private heroQuoteCursor = 0;
   private nextHeroQuoteAt = 12;
   private readonly victoryOverlay: HTMLDivElement;
+  private gateRushTimer = 0;
+  private gateRushX = 0;
+  private gateRushZ = 0;
+  private gateRushHorizontal = true;
+  private playerWallHits = 0;
 
   // 히트스탑: 시뮬 dt만 스케일, 연출/카메라는 실제 dt 유지 (game-feel)
   private timeScale = 1;
@@ -171,6 +183,7 @@ export class Run {
   private readonly ctx: WeaponContext;
   private readonly damageFlash: HTMLDivElement;
   private curChoices: Choice[] = [];
+  private readonly moveOut = { x: 0, z: 0 };
 
   constructor(atlas: Atlas, rig: CameraRig, input: Input, hooks: RunHooks, touch = false) {
     this.atlas = atlas;
@@ -180,6 +193,8 @@ export class Run {
     this.hud = new Hud(touch);
 
     this.ground = new Ground(this.scene);
+    this.map.update(0, 0, 0);
+    this.world = new BattlefieldWorld(this.scene, this.map);
     this.soldiersR = new InstancedSpriteRenderer(atlas.soldiers, ENEMY_CAP);
     this.variantsR = new InstancedSpriteRenderer(atlas.variants, ENEMY_CAP);
     this.sgradeR = new InstancedSpriteRenderer(atlas.sgrade, 48);
@@ -197,6 +212,7 @@ export class Run {
     this.particles = new ParticleSystem(this.scene);
     this.damageText = new DamageText(this.scene);
     this.labels = new Labels(this.scene);
+    this.gateBreachFx = new GateBreachFx(this.scene);
     this.gems = new GemPool(this.scene);
     this.projectiles = new ProjectilePool(this.scene);
     this.zones = new ZonePool(this.scene);
@@ -207,7 +223,7 @@ export class Run {
     this.player.setRimScale(touch ? 0.5 : 1); // 모바일 저해상도 블룸에서 림 과다 방지
     this.scene.add(this.player.mesh);
     this.companion = new Companion(this.scene, atlas);
-    this.spawner = new Spawner(atlas, this.enemies);
+    this.spawner = new Spawner(atlas, this.enemies, this.map);
     this.weapons = [createWeapon(this.hero.startWeapon)];
 
     this.combo = new Combo(
@@ -397,6 +413,10 @@ export class Run {
     this.musou.reset();
     this.events.reset();
     this.objects.reset();
+    this.map.reset();
+    this.gateBreachFx.reset();
+    this.gateRushTimer = 0;
+    this.playerWallHits = 0;
     this.companion.reset(this.hero.id);
     this.boss.active = false;
     this.boss.idx = -1;
@@ -492,6 +512,8 @@ export class Run {
       const tx = Math.sin(this.attractTime * 0.06) * 5;
       const tz = Math.cos(this.attractTime * 0.05) * 5;
       this.ground.update(dt, tx, tz);
+      this.map.update(tx, tz, dt);
+      this.world.update();
       this.particles.update(dt);
       this.effects.update(dt);
       this.rig.update(dt, tx, tz);
@@ -533,7 +555,16 @@ export class Run {
     // === 시뮬레이션 ===
     this.gameTime += gdt;
     this.player.musouInvuln = this.musou.active;
+    this.map.update(this.player.x, this.player.z, gdt);
+    const prevPlayerX = this.player.x;
+    const prevPlayerZ = this.player.z;
     this.player.update(gdt, this.input);
+    if (this.map.resolveMovement(
+      prevPlayerX, prevPlayerZ, this.player.x, this.player.z, this.player.radius, this.moveOut,
+    )) this.playerWallHits++;
+    this.player.setPosition(this.moveOut.x, this.moveOut.z);
+    this.map.update(this.player.x, this.player.z, 0);
+    this.world.update();
 
     // 선택 장수의 군웅전 NPC 카드 대사를 런 전반에 드문드문 노출한다.
     if (this.gameTime >= this.nextHeroQuoteAt) {
@@ -544,13 +575,13 @@ export class Run {
     // 보스 스케줄
     this.checkBossSpawn();
 
-    this.spawner.update(edt, this.gameTime, this.player.x, this.player.z);
     this.spawner.setBossActive(this.boss.active);
+    this.spawner.update(edt, this.gameTime, this.player.x, this.player.z);
 
     // 분리용 해시 (이동 전)
     this.hash.clear();
     this.enemies.insertAll(this.hash);
-    this.enemies.update(edt, this.player.x, this.player.z, this.hash, this.enemyProj);
+    this.enemies.update(edt, this.player.x, this.player.z, this.hash, this.enemyProj, this.effects, this.map);
 
     // ctx 갱신
     this.ctx.dt = gdt;
@@ -594,7 +625,13 @@ export class Run {
 
     // 무쌍 난무 (실제 dt로 진행, 종료 시 마무리 충격파)
     this.ctx.dt = dt;
+    const preMusouX = this.player.x;
+    const preMusouZ = this.player.z;
     this.musou.update(dt, this.ctx, this.player);
+    this.map.resolveMovement(
+      preMusouX, preMusouZ, this.player.x, this.player.z, this.player.radius, this.moveOut,
+    );
+    this.player.setPosition(this.moveOut.x, this.moveOut.z);
     this.ctx.dt = gdt;
 
     // 적 투사체 (적 dt)
@@ -626,8 +663,20 @@ export class Run {
     this.effects.update(dt);
     this.particles.update(dt);
     this.damageText.update(dt);
+    this.gateBreachFx.update(dt);
     this.ground.update(dt, this.player.x, this.player.z);
+    this.map.update(this.player.x, this.player.z, dt);
+    this.world.update();
     this.rig.update(dt, this.player.x, this.player.z);
+
+    if (this.gateRushTimer > 0) {
+      this.gateRushTimer -= dt;
+      if (this.gateRushTimer <= 0) {
+        this.spawner.spawnGateRush(
+          this.gateRushX, this.gateRushZ, this.gateRushHorizontal, this.gameTime / 60,
+        );
+      }
+    }
 
     // 무쌍 포스트 연출 세기 부드럽게
     const target = this.musou.active ? 0.9 : 0;
@@ -767,6 +816,8 @@ export class Run {
     const en = this.enemies;
     const x = en.x[i];
     const z = en.z[i];
+    const breachedGate = this.map.recordKillAt(x, z);
+    if (breachedGate) this.onGateBreached(breachedGate);
     if (en.cart[i] === 1) {
       // 보급 마차 확보: 골드 대량 + 보물상자
       this.particles.burst(x, z, 2.6, 2.0, 0.7, 30, 6);
@@ -822,6 +873,24 @@ export class Run {
     this.musou.addKill(this.combo.count);
     this.rig.punchFov(-0.5); // 미세 펀치줌
     en.kill(i);
+  }
+
+  private onGateBreached(gate: GateBarrier): void {
+    this.world.update();
+    this.gateBreachFx.burst(gate.x, gate.z);
+    this.effects.spawnRing(gate.x, gate.z, 11, 1.15, 0.36, 0.13, 0.62);
+    this.effects.spawnRing(gate.x, gate.z, 6.5, 0.95, 0.62, 0.24, 0.4);
+    this.particles.burst(gate.x, gate.z, 1.8, 0.7, 0.25, 72, 9);
+    this.hitstop(90, 0.03);
+    this.rig.addTrauma(0.78);
+    this.rig.punchFov(3);
+    this.flashScreen(0.16);
+    this.hud.banner('호로관 파성 虎牢關破城', '#ffb05a', 58, 1900);
+    audio.sfx('explosion');
+    this.gateRushTimer = 0.8;
+    this.gateRushX = gate.x;
+    this.gateRushZ = gate.z;
+    this.gateRushHorizontal = gate.horizontal;
   }
 
   private readonly onCollect = (value: number): void => {
@@ -1195,6 +1264,25 @@ export class Run {
     else if (name === 'meteor') this.events.forceMeteor();
     else if (name === 'cart') this.events.forceCart(this.gameTime);
   }
+  testSpawnPattern(name: string): void {
+    this.spawner.forcePattern(name, this.gameTime, this.player.x, this.player.z);
+  }
+  testSetPlayerPosition(x: number, z: number): void {
+    this.map.projectWalkable(x, z, this.player.radius, this.moveOut);
+    this.player.setPosition(this.moveOut.x, this.moveOut.z);
+    this.map.update(this.player.x, this.player.z, 0);
+    this.world.update();
+  }
+  testPrimeGate(): void {
+    this.map.primeGate();
+  }
+  testBreachGate(): void {
+    this.map.primeGate();
+    const gate = this.map.gates.find((candidate) => candidate.key === 'origin-north');
+    if (!gate) return;
+    const breached = this.map.recordKillAt(gate.x, gate.z);
+    if (breached) this.onGateBreached(breached);
+  }
   // 다음 레벨업 카드에 저주 유물 강제 + 즉시 레벨업
   testForceRelic(): void {
     this.forceRelicNext = true;
@@ -1217,6 +1305,30 @@ export class Run {
       maxCombo: this.maxCombo,
       hero: this.hero.id,
       alive: this.enemies.aliveCount,
+      worldProps: this.world.visibleProps,
+      worldObjects: this.objects.visibleCount,
+      map: {
+        walls: this.map.walls.length,
+        roads: this.map.roads.length,
+        landmarkVisible: this.world.landmarkVisible,
+        colliders: this.map.activeColliderCount,
+        collisions: this.map.collisionCount,
+        gateKills: this.map.gateKills,
+        gateBreached: this.map.isGateBreached(),
+        breaches: this.map.breachCount,
+        playerInsideWall: this.map.circleBlocked(this.player.x, this.player.z, this.player.radius * 0.95),
+        playerWallHits: this.playerWallHits,
+        enemiesInsideWall: this.enemies.countInsideWalls(this.map),
+        debris: this.gateBreachFx.activeCount,
+        playerX: this.player.x,
+        playerZ: this.player.z,
+      },
+      enemyProjectiles: this.enemyProj.activeCount,
+      patterns: {
+        charge: this.enemies.chargeStarts,
+        volley: this.enemies.volleyStarts,
+        caster: this.enemies.casterStarts,
+      },
       weapons: this.weapons.map((w) => `${w.id}:${w.level}`),
       passives: { ...this.passives },
       musou: this.musou.gauge,
