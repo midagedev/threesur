@@ -1412,9 +1412,10 @@ export class Run {
       audio.sfx('relic');
       // 획득 모먼트: 금빛 한자 문장 솟음 + 링 + 순간 광원 (절제된 단발)
       const hz = MASTERWORK_BY_ID[c.id].hanja[0];
-      this.effects.spawnCrest(this.player.x, this.player.z, hz, 1.9, 1.5, 0.5, 2.0);
-      this.effects.spawnRing(this.player.x, this.player.z, 9, 1.9, 1.5, 0.5, 0.7);
-      if (this.effects.spawnLight) this.effects.spawnLight(this.player.x, this.player.z, 1.6, 1.2, 0.4, 10, 0.5);
+      // 금빛이 백색으로 타지 않게 강도 하향 (E2E 판독 반영 — 금색 정체성 유지)
+      this.effects.spawnCrest(this.player.x, this.player.z, hz, 1.3, 1.02, 0.34, 2.0);
+      this.effects.spawnRing(this.player.x, this.player.z, 9, 1.3, 1.02, 0.34, 0.7);
+      if (this.effects.spawnLight) this.effects.spawnLight(this.player.x, this.player.z, 1.6, 1.2, 0.4, 7, 0.5);
     } else {
       if (c.id === 'heal') this.player.heal(this.player.maxHp * 0.5);
       else if (c.id === 'gold') this.gold += 200; // 런 내 리롤용(메타 적립 아님)
