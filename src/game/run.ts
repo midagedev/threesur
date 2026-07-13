@@ -10,6 +10,7 @@ import { EffectsSystem } from '../gfx/effects';
 import { ParticleSystem } from '../gfx/particles';
 import { DamageText } from '../gfx/damageText';
 import { Labels } from '../gfx/labels';
+import { MarkerLayer } from '../gfx/markers';
 import { Player } from './player';
 import { EnemyPool, ENEMY_CAP, SHEET_SGRADE, SHEET_APRIORITY } from './enemies';
 import { Spawner } from './spawner';
@@ -57,7 +58,7 @@ import { audio } from '../core/audio';
 import { Companion } from './companion';
 import { pickLine } from '../data/dialogue';
 import { BattlefieldMap } from './battlefieldMap';
-import type { GateBarrier } from './battlefieldMap';
+import type { GateBarrier, MapLandmark } from './battlefieldMap';
 
 type State = 'attract' | 'play' | 'levelup' | 'paused' | 'dead' | 'victory';
 
@@ -120,6 +121,7 @@ export class Run {
   private readonly particles: ParticleSystem;
   private readonly damageText: DamageText;
   private readonly labels: Labels;
+  private readonly markers: MarkerLayer;
   private readonly gateBreachFx: GateBreachFx;
 
   private readonly player: Player;
@@ -224,6 +226,7 @@ export class Run {
     this.particles = new ParticleSystem(this.scene);
     this.damageText = new DamageText(this.scene);
     this.labels = new Labels(this.scene);
+    this.markers = new MarkerLayer(this.scene);
     this.gateBreachFx = new GateBreachFx(this.scene);
     this.gems = new GemPool(this.scene);
     this.projectiles = new ProjectilePool(this.scene);
@@ -400,6 +403,7 @@ export class Run {
     this.enemyProj.reset();
     this.treasure.reset();
     this.labels.reset();
+    this.markers.reset();
     this.spawner.reset();
     this.combo.reset();
     this.musou.reset();
@@ -728,6 +732,7 @@ export class Run {
     // 렌더 버퍼
     this.renderSprites();
     this.updateLabels();
+    this.updateMarkers(dt);
 
     // 레벨업 대기
     if (this.pendingLevels > 0 && this.state === 'play') this.showNextLevelUp();
@@ -814,6 +819,49 @@ export class Run {
       }
     }
     this.labels.end();
+  }
+
+  // 랜드마크/오브젝트 표식(글로우·이름표·근접 힌트) + 랜드마크 상시 연출.
+  private updateMarkers(dt: number): void {
+    const px = this.player.x;
+    const pz = this.player.z;
+    this.markers.begin(this.renderTime);
+    const lms = this.map.landmarks;
+    for (let i = 0; i < lms.length; i++) {
+      const lm = lms[i];
+      const dx = px - lm.x;
+      const dz = pz - lm.z;
+      const dsq = dx * dx + dz * dz;
+      if (lm.glow > 0) this.markers.glowAt(lm.x, lm.z, lm.glow, lm.gr, lm.gg, lm.gb);
+      if (dsq < 30 * 30) this.markers.name(lm.name, lm.x, lm.height * 0.5 + 1.0, lm.z);
+      if (dsq < 46 * 46) this.emitLandmarkAmbient(lm, dt);
+    }
+    // 전장 오브젝트(화약통/만두/사당/목책)
+    this.objects.emitMarkers(this.markers, px, pz);
+    this.markers.end();
+  }
+
+  // 봉화대 불티 / 군영·잔해 연기 (근거리에서만, 순수 연출 — Math.random 게이트)
+  private emitLandmarkAmbient(lm: MapLandmark, dt: number): void {
+    const k = lm.kind;
+    if (k === 11) {
+      if (Math.random() < 13 * dt) this.particles.fireEmber(lm.x, lm.z, 0.5);
+    } else if (k === 5) {
+      if (Math.random() < 4 * dt) {
+        this.particles.emit(
+          lm.x + (Math.random() - 0.5), lm.height * 0.72, lm.z + (Math.random() - 0.5) * 0.6,
+          (Math.random() - 0.5) * 0.2, 0.7 + Math.random() * 0.4, (Math.random() - 0.5) * 0.2,
+          0.5, 0.5, 0.52, 1.1, 1.2, -0.3, 0.95,
+        );
+      }
+    } else if (k === 4) {
+      if (Math.random() < 2 * dt) {
+        this.particles.emit(
+          lm.x, lm.height * 0.5, lm.z, 0, 0.5 + Math.random() * 0.3, 0,
+          0.42, 0.42, 0.44, 0.9, 1.4, -0.2, 0.96,
+        );
+      }
+    }
   }
 
   private contactDamage(): void {
@@ -1377,6 +1425,7 @@ export class Run {
       map: {
         walls: this.map.walls.length,
         roads: this.map.roads.length,
+        landmarks: this.map.landmarks.length,
         landmarkVisible: this.world.landmarkVisible,
         colliders: this.map.activeColliderCount,
         collisions: this.map.collisionCount,

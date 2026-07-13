@@ -31,6 +31,42 @@ export interface MapProp {
   height: number;
 }
 
+// 오픈필드에 흩어 놓는 전술 랜드마크(충돌 없음 — 미로가 아니라 시각 지표).
+export interface MapLandmark {
+  x: number;
+  z: number;
+  kind: number;
+  width: number;
+  height: number;
+  name: string;
+  glow: number; // 상시 글로우 반경(0이면 없음)
+  gr: number;
+  gg: number;
+  gb: number;
+}
+
+interface LandmarkType {
+  kind: number;
+  width: number;
+  height: number;
+  name: string;
+  glow: number;
+  gr: number;
+  gg: number;
+  gb: number;
+}
+
+// WORLD_ASSETS: tower=2, palisade=3, siegeWreck=4, camp=5, warDrum=6, beacon=11
+const LANDMARK_TYPES: LandmarkType[] = [
+  { kind: 11, width: 3.2, height: 5.4, name: '봉화대 烽火', glow: 2.8, gr: 1.7, gg: 0.85, gb: 0.32 },
+  { kind: 5, width: 5.4, height: 4.0, name: '군영 軍營', glow: 0, gr: 0, gg: 0, gb: 0 },
+  { kind: 6, width: 3.0, height: 3.4, name: '전고 戰鼓', glow: 1.7, gr: 1.0, gg: 0.38, gb: 0.26 },
+  { kind: 2, width: 3.4, height: 5.6, name: '망루 望樓', glow: 0, gr: 0, gg: 0, gb: 0 },
+  { kind: 4, width: 4.8, height: 3.6, name: '공성 잔해 殘骸', glow: 0, gr: 0, gg: 0, gb: 0 },
+];
+const LANDMARK_COUNT = 12;
+const GOLDEN_ANGLE = 2.399963229728653;
+
 export interface GateBarrier {
   key: string;
   x: number;
@@ -83,6 +119,7 @@ export class BattlefieldMap {
   readonly walls: MapWall[] = [];
   readonly roads: MapRoad[] = [];
   readonly props: MapProp[] = [];
+  readonly landmarks: MapLandmark[] = [];
   readonly gates: GateBarrier[] = [];
   revision = 0;
   collisionCount = 0;
@@ -162,10 +199,29 @@ export class BattlefieldMap {
     this.walls.length = 0;
     this.roads.length = 0;
     this.props.length = 0;
+    this.landmarks.length = 0;
     this.gates.length = 0;
     this.colliders.length = 0;
+    this.buildLandmarks(); // 오픈필드 전술 랜드마크(항상, 충돌 없음)
     if (this.hulaoActive) this.buildHulao();
     this.revision++;
+  }
+
+  // 원점 주변에 나선형으로 랜드마크를 흩어 놓는다. 충돌체를 만들지 않아
+  // 포위·휩쓸기 오픈필드 감각을 해치지 않으면서 전장에 지표와 스펙터클을 준다.
+  private buildLandmarks(): void {
+    for (let i = 0; i < LANDMARK_COUNT; i++) {
+      const t = LANDMARK_TYPES[i % LANDMARK_TYPES.length];
+      const radius = 18 + i * 5.8;
+      const a = i * GOLDEN_ANGLE;
+      const x = Math.cos(a) * radius;
+      const z = Math.sin(a) * radius;
+      this.props.push({ x, z, kind: t.kind, width: t.width, height: t.height });
+      this.landmarks.push({
+        x, z, kind: t.kind, width: t.width, height: t.height,
+        name: t.name, glow: t.glow, gr: t.gr, gg: t.gg, gb: t.gb,
+      });
+    }
   }
 
   // 호로관 성문: 가로 성벽 한 줄 + 중앙 게이트(파성 전까지 콜라이더). 세트피스 전용.

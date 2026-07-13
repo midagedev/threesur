@@ -3,6 +3,7 @@ import {
 } from 'three';
 import type { EffectsSystem } from '../gfx/effects';
 import type { ParticleSystem } from '../gfx/particles';
+import type { MarkerLayer } from '../gfx/markers';
 import type { Rng } from '../core/rng';
 import { WorldSpriteBatch, WORLD_ASSETS } from '../gfx/worldKit';
 import { ShadowRenderer } from '../gfx/sprites';
@@ -29,6 +30,18 @@ const KIND_DUMPLING = 1;
 const KIND_SHRINE = 2;
 const KIND_PALISADE = 3;
 const BARREL_RADIUS = 4;
+const HINT_RADIUS = 5.2; // 근접 힌트 표시 거리
+
+// 종류별 이름표 / 힌트 / 이름표 높이 / 상시 글로우(r,g,b,반경, 0이면 없음)
+const OBJ_NAME = ['화약통 火藥', '만두 수레 饅頭', '군신 사당 軍神祠', '목책 木柵'];
+const OBJ_HINT = ['공격 → 폭파', '회복 +30%', '버프 획득', '공격 → 돌파'];
+const OBJ_LABEL_Y = [2.5, 2.6, 3.8, 2.6];
+const OBJ_GLOW: (readonly [number, number, number, number] | null)[] = [
+  [1.5, 0.5, 0.18, 2.5], // 화약통 — 위험한 붉은 잔광
+  [0.55, 1.25, 0.7, 2.2], // 만두 수레 — 온기 도는 녹빛
+  [1.5, 1.05, 0.4, 3.4], // 군신 사당 — 금빛 후광(가장 크게)
+  null, // 목책 — 글로우 없음
+];
 
 // 화약통(폭발·연쇄) / 만두 수레(회복) / 군신 사당(버프) 관리.
 export class BattlefieldObjects {
@@ -81,16 +94,45 @@ export class BattlefieldObjects {
       this.spawnTimer = this.d.rng.range(6, 11);
       this.spawnObject(gameTime);
     }
-    // 플레이어 접촉(만두/사당)
+    // 플레이어 접촉(만두/사당) + 상시 이펙트(연기/김/스파크)
     const px = this.d.playerX();
     const pz = this.d.playerZ();
     const cr = this.d.playerRadius + 0.9;
+    const p = this.d.particles;
     for (let i = 0; i < OBJ_CAP; i++) {
       if (this.alive[i] === 0) continue;
-      const dx = px - this.x[i];
-      const dz = pz - this.z[i];
-      if (this.kind[i] === KIND_BARREL || this.kind[i] === KIND_PALISADE) continue; // 무기로만 반응
+      const k = this.kind[i];
+      const x = this.x[i];
+      const z = this.z[i];
+      // 상시 이펙트(Math.random 게이트 — 게임플레이 rng와 분리한 순수 연출)
+      if (k === KIND_DUMPLING) {
+        if (Math.random() < 9 * dt) p.steam(x, z + 0.2);
+      } else if (k === KIND_SHRINE) {
+        if (Math.random() < 7 * dt) p.incense(x, z);
+      } else if (k === KIND_BARREL) {
+        if (Math.random() < 3.5 * dt) p.spark(x, z);
+      }
+      if (k === KIND_BARREL || k === KIND_PALISADE) continue; // 무기로만 반응
+      const dx = px - x;
+      const dz = pz - z;
       if (dx * dx + dz * dz <= cr * cr) this.interact(i);
+    }
+  }
+
+  // 표식 레이어에 종류별 글로우/이름표/근접 힌트를 밀어넣는다(run이 프레임마다 호출).
+  emitMarkers(layer: MarkerLayer, px: number, pz: number): void {
+    const hintSq = HINT_RADIUS * HINT_RADIUS;
+    for (let i = 0; i < OBJ_CAP; i++) {
+      if (this.alive[i] === 0) continue;
+      const k = this.kind[i];
+      const x = this.x[i];
+      const z = this.z[i];
+      const g = OBJ_GLOW[k];
+      if (g) layer.glowAt(x, z, g[3], g[0], g[1], g[2]);
+      layer.name(OBJ_NAME[k], x, OBJ_LABEL_Y[k], z);
+      const dx = px - x;
+      const dz = pz - z;
+      if (dx * dx + dz * dz <= hintSq) layer.hint(OBJ_HINT[k], x, OBJ_LABEL_Y[k] + 1.0, z);
     }
   }
 

@@ -179,6 +179,69 @@ export class ParticleSystem {
     );
   }
 
+  // 만두 수레 김 (상시). 흰 김이 천천히 위로 피어오른다.
+  steam(x: number, z: number): void {
+    const ang = Math.random() * Math.PI * 2;
+    const rr = Math.random() * 0.5;
+    this.emit(
+      x + Math.cos(ang) * rr,
+      1.6 + Math.random() * 0.4,
+      z + Math.sin(ang) * rr,
+      (Math.random() - 0.5) * 0.3,
+      0.9 + Math.random() * 0.7,
+      (Math.random() - 0.5) * 0.3,
+      0.9,
+      0.95,
+      0.85,
+      0.9 + Math.random() * 0.5,
+      0.7 + Math.random() * 0.5,
+      -0.6, // 위로 천천히
+      0.94,
+    );
+  }
+
+  // 화약통 불티 (상시). 작고 빠른 주황 스파크가 튄다.
+  spark(x: number, z: number): void {
+    const ang = Math.random() * Math.PI * 2;
+    const sp = 1.6 + Math.random() * 2.2;
+    this.emit(
+      x,
+      1.0 + Math.random() * 0.6,
+      z,
+      Math.cos(ang) * sp,
+      1.2 + Math.random() * 2.0,
+      Math.sin(ang) * sp,
+      1.6,
+      0.85,
+      0.25,
+      0.42 + Math.random() * 0.3,
+      0.22 + Math.random() * 0.16,
+      7,
+      0.9,
+    );
+  }
+
+  // 군신 사당 향 연기 (상시). 은은한 금빛 연기가 완만히 오른다.
+  incense(x: number, z: number): void {
+    const ang = Math.random() * Math.PI * 2;
+    const rr = Math.random() * 0.7;
+    this.emit(
+      x + Math.cos(ang) * rr,
+      1.2 + Math.random() * 0.5,
+      z + Math.sin(ang) * rr,
+      (Math.random() - 0.5) * 0.25,
+      0.55 + Math.random() * 0.5,
+      (Math.random() - 0.5) * 0.25,
+      1.1,
+      0.92,
+      0.55,
+      0.8 + Math.random() * 0.6,
+      0.9 + Math.random() * 0.6,
+      -0.4,
+      0.95,
+    );
+  }
+
   // 먼지 퍼프 (기마 돌격 궤적).
   dust(x: number, z: number): void {
     const ang = Math.random() * Math.PI * 2;
