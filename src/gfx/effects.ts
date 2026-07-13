@@ -872,7 +872,7 @@ const FIREWALL_FRAG = /* glsl */ `
     float flick = 0.6 + 0.4 * sin(uT * 14.0 + vUv.x * 30.0) * h(floor(vUv * vec2(24.0, 4.0)));
     float b = pow(max(across, 0.0), 1.4) * flick;
     if (b <= 0.01) discard;
-    gl_FragColor = vec4(uColor * b * 1.5, b * uAlpha);
+    gl_FragColor = vec4(uColor * b * 0.35, b * uAlpha * 0.8); // #23: additive 누적 백색폭발 방지로 강도 하향
   }
 `;
 

@@ -100,8 +100,8 @@ export class Musou {
       ctx.effects.spawnCrest(player.x, player.z, crest.char, crest.r, crest.g, crest.b, DURATION);
       if (this.heroMusou === 'zhugeliang') ctx.effects.spawnBaguaSigil(player.x, player.z, DURATION);
     }
-    // 따라다니는 은은한 테마 광원(상시 재갱신). 화면 화이트아웃 방지로 반경·강도 억제.
-    ctx.effects.spawnMusouLight?.(player.x, player.z, crest.r * 0.4, crest.g * 0.4, crest.b * 0.4, 7, 0.07);
+    // 따라다니는 은은한 테마 광원(상시 재갱신). 화면 화이트아웃 방지로 반경·강도 억제(#23).
+    ctx.effects.spawnMusouLight?.(player.x, player.z, crest.r * 0.32, crest.g * 0.32, crest.b * 0.32, 6.5, 0.07);
 
     switch (this.heroMusou) {
       case 'zhaoyun': this.runZhaoyun(ctx, player); break;
@@ -229,11 +229,12 @@ export class Musou {
   private runLvbu(ctx: WeaponContext, player: Player): void {
     ctx.particles.dust(player.x, player.z); // 말발굽 먼지/불꽃
     if (this.tick > 0) return;
-    this.tick = 0.12;
-    // 돌진 궤적에 잔류 화염 벽(진행방향). 정지 시 과도한 중첩을 막게 잔류 짧게.
-    ctx.effects.spawnFireWall(player.x, player.z, player.faceX, player.faceZ, 6, 1.8, 1.3);
-    ctx.effects.spawnRing(player.x, player.z, 6, 2.4, 1.0, 0.4, 0.4);
-    this.aoe(ctx, player.x, player.z, 7, 85 * ctx.stats.damageMul, 6);
+    // #23: 정지 시 동일 위치 화염벽이 additive 누적돼 백색 폭발 → 생성간격↑·잔류↓·강도↓로 완화.
+    this.tick = 0.28;
+    ctx.effects.spawnFireWall(player.x, player.z, player.faceX, player.faceZ, 6, 1.5, 0.5);
+    // 링 반경 <3 → lightField 광원 미생성(정지 시 광원 누적 차단).
+    ctx.effects.spawnRing(player.x, player.z, 2.6, 2.2, 1.0, 0.4, 0.3);
+    this.aoe(ctx, player.x, player.z, 7, 85 * ctx.stats.damageMul * 2.3, 6); // 간격 늘린 만큼 틱당 피해 보정
   }
 
   private aoe(ctx: WeaponContext, cx: number, cz: number, radius: number, damage: number, knockback: number): void {
