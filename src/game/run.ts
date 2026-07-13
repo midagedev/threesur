@@ -40,7 +40,7 @@ import {
 import { TreasurePool } from './treasure';
 import { Combo } from './combo';
 import { Musou } from './musou';
-import { Boss } from './boss';
+import { Boss, MINIBOSS_CYCLE } from './boss';
 import { BattlefieldEvents } from './events';
 import { BattlefieldObjects } from './objects';
 import type { BuffKind } from './player';
@@ -181,6 +181,8 @@ export class Run {
   private ended = false; // onEnd 중복 방지
   private attractTime = 0;
   private bossFlags = { b3: false, b6: false, b9: false };
+  private minibossIdx = 0; // 무한 모드 미니보스 순환 인덱스
+  private nextMinibossAt = 720; // 12분부터 3분 주기
   private frameKills = 0;
   private killWindowT = 0; // #24 킬캠 롤링 윈도우(0.35s)
   private killWindowCount = 0;
@@ -525,6 +527,8 @@ export class Run {
     this.bossesKilled.clear();
     this.ended = false;
     this.bossFlags = { b3: false, b6: false, b9: false };
+    this.minibossIdx = 0;
+    this.nextMinibossAt = 720;
     this.timeScale = 1;
     this.hitstopRemaining = 0;
     this.musouStrength = 0;
@@ -888,20 +892,34 @@ export class Run {
     this.nextHeroQuoteAt = this.gameTime + 60;
   }
 
+  // 슬롯별 등장 후보(랜덤). 9분 슬롯은 최종보스 여포 고정.
+  private static readonly BOSS_SLOT_3 = ['yuanshao', 'xiahoudun', 'sunce'];
+  private static readonly BOSS_SLOT_6 = ['dongzhuo', 'simayi', 'zhouyu'];
+
   private checkBossSpawn(): void {
     if (this.boss.active) return;
     let spawned = false;
+    const minute = this.gameTime / 60;
     if (!this.bossFlags.b3 && this.gameTime >= 180) {
       this.bossFlags.b3 = true;
-      this.boss.spawn('yuanshao', this.gameTime / 60, this.ctx, this.player.x, this.player.z);
+      const pool = Run.BOSS_SLOT_3;
+      this.boss.spawn(pool[rng.int(pool.length)], minute, this.ctx, this.player.x, this.player.z);
       spawned = true;
     } else if (!this.bossFlags.b6 && this.gameTime >= 360) {
       this.bossFlags.b6 = true;
-      this.boss.spawn('dongzhuo', this.gameTime / 60, this.ctx, this.player.x, this.player.z);
+      const pool = Run.BOSS_SLOT_6;
+      this.boss.spawn(pool[rng.int(pool.length)], minute, this.ctx, this.player.x, this.player.z);
       spawned = true;
     } else if (!this.bossFlags.b9 && this.gameTime >= 540) {
       this.bossFlags.b9 = true;
-      this.boss.spawn('lvbu', this.gameTime / 60, this.ctx, this.player.x, this.player.z);
+      this.boss.spawn('lvbu', minute, this.ctx, this.player.x, this.player.z);
+      spawned = true;
+    } else if (this.endless && this.gameTime >= this.nextMinibossAt) {
+      // 무한 모드: 12분부터 3분 주기로 미니보스 5종 순환 (HP는 minute 스케일로 상승)
+      this.nextMinibossAt += 180;
+      const id = MINIBOSS_CYCLE[this.minibossIdx % MINIBOSS_CYCLE.length];
+      this.minibossIdx++;
+      this.boss.spawn(id, minute, this.ctx, this.player.x, this.player.z);
       spawned = true;
     }
     if (spawned && this.boss.idx >= 0) {
