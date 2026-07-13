@@ -22,14 +22,12 @@ export class Joystick {
   constructor(input: Input) {
     this.input = input;
 
-    // 좌측 이동 존 (플로팅 조이스틱 발생 영역)
+    // 이동 존 = 전체 화면(무쌍 버튼은 z-index가 더 높아 자연히 제외).
+    // "아무 데나 터치 = 이동" 원스틱 패턴 — 좁은 존 밖 탭으로 첫 활성화 실패하는 문제 제거.
     this.moveZone = document.createElement('div');
     this.moveZone.style.cssText = [
       'position:fixed',
-      'left:0',
-      'bottom:0',
-      'width:55%',
-      'height:70%',
+      'inset:0',
       'z-index:22',
       'touch-action:none',
       'display:none',
@@ -116,9 +114,17 @@ export class Joystick {
     this.moveZone.addEventListener('pointerup', this.onMoveUp);
     this.moveZone.addEventListener('pointercancel', this.onMoveUp);
     this.moveZone.addEventListener('lostpointercapture', this.onMoveUp);
+    // 안전망: 캡처 실패/이벤트 누락으로 존에서 up을 못 받아도 window에서 해제 → stuck 방지.
+    window.addEventListener('pointerup', this.onWindowRelease);
+    window.addEventListener('pointercancel', this.onWindowRelease);
 
     this.musouBtn.addEventListener('pointerdown', this.onMusouDown);
   }
+
+  // window 레벨 해제 안전망 (추적 중인 포인터가 어디서 놓이든 확실히 리셋).
+  private readonly onWindowRelease = (e: PointerEvent): void => {
+    if (this.movePointer !== -1 && e.pointerId === this.movePointer) this.endMove();
+  };
 
   setVisible(v: boolean): void {
     if (this.visible === v) return;
@@ -197,6 +203,13 @@ export class Joystick {
   };
 
   private endMove(): void {
+    if (this.movePointer !== -1) {
+      try {
+        this.moveZone.releasePointerCapture(this.movePointer);
+      } catch {
+        /* ignore */
+      }
+    }
     this.movePointer = -1;
     this.base.style.display = 'none';
     this.input.joy.active = false;
