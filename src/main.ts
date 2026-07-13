@@ -263,6 +263,8 @@ loadAtlas()
       setInvulnerable: (seconds?: number) => run.testSetInvulnerable(seconds),
       primeGate: () => run.testPrimeGate(),
       breachGate: () => run.testBreachGate(),
+      triggerHulao: () => run.testTriggerHulao(),
+      resumeEndless: () => run.resumeEndless(),
       forceRelic: () => run.testForceRelic(),
       enterEndless: () => run.testEnterEndless(),
       get stats() {

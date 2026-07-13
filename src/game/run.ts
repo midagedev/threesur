@@ -59,7 +59,7 @@ import { pickLine } from '../data/dialogue';
 import { BattlefieldMap } from './battlefieldMap';
 import type { GateBarrier } from './battlefieldMap';
 
-type State = 'attract' | 'play' | 'levelup' | 'paused' | 'dead' | 'victory' | 'victoryChoice';
+type State = 'attract' | 'play' | 'levelup' | 'paused' | 'dead' | 'victory';
 
 // 런 종료 결과 (App이 저장·결과화면에 사용).
 export interface RunResult {
@@ -75,6 +75,7 @@ export interface RunResult {
   passives: { id: string; level: number }[];
   bosses: string[]; // 처치한 보스 type id
   endless: boolean; // 무한 모드 진입 여부(10분 승리 후 계속 전투)
+  canContinue: boolean; // 결과 화면에서 "계속 싸운다"(무한 진입) 가능 여부
 }
 
 // App이 주입하는 씬 전환 콜백.
@@ -167,12 +168,11 @@ export class Run {
   private relicIds: string[] = []; // 보유 저주 유물(카드 중복 방지·카운트)
   private feverWasOn = false; // 콤보 피버 진입 감지
   private endless = false; // 무한 모드(10분 승리 후 계속)
-  private victoryChoiceShown = false; // 승리 선택 오버레이 1회 표시
   private victoryAchieved = false; // 10분 도달(이후 사망해도 승리 처리)
   private forceRelicNext = false; // 테스트: 다음 레벨업 카드에 유물 강제
   private heroQuoteCursor = 0;
   private nextHeroQuoteAt = 12;
-  private readonly victoryOverlay: HTMLDivElement;
+  private hulaoAt = 0; // 호로관 세트피스 예정 시각(초). 0이면 미예정
   private gateRushTimer = 0;
   private gateRushX = 0;
   private gateRushZ = 0;
@@ -343,36 +343,6 @@ export class Run {
       'background:radial-gradient(ellipse at center, rgba(0,0,0,0) 40%, rgba(180,30,24,0.85) 100%)',
     ].join(';');
     document.body.appendChild(this.damageFlash);
-
-    // 10분 승리 선택 오버레이 (계속 싸운다 → 무한 모드 / 결과 보기 → 종료). 자체 DOM.
-    this.victoryOverlay = document.createElement('div');
-    this.victoryOverlay.style.cssText = [
-      'position:fixed', 'inset:0', 'display:none', 'flex-direction:column', 'align-items:center',
-      'justify-content:center', 'gap:18px', 'background:rgba(6,7,12,0.86)', 'z-index:41',
-      'font-family:"Nanum Myeongjo","Times New Roman",serif', 'text-align:center',
-    ].join(';');
-    this.victoryOverlay.innerHTML =
-      '<div style="color:#ffe9a8;font-size:58px;letter-spacing:10px;text-shadow:0 0 24px rgba(255,233,168,0.7);">天下統一</div>' +
-      '<div style="color:#f0e4c0;font-size:19px;letter-spacing:3px;">천하통일 — 계속 싸우겠는가?</div>';
-    const vrow = document.createElement('div');
-    vrow.style.cssText = 'display:flex;gap:16px;margin-top:8px;';
-    const mkVBtn = (label: string, primary: boolean, onClick: () => void): void => {
-      const btn = document.createElement('button');
-      btn.textContent = label;
-      btn.style.cssText = [
-        'padding:12px 24px', 'border-radius:8px', 'cursor:pointer', 'font-size:16px',
-        'letter-spacing:2px', 'font-family:inherit',
-        primary
-          ? 'background:linear-gradient(180deg,#e8c667,#a8791f);color:#161006;border:none;'
-          : 'background:transparent;color:#e8c667;border:1px solid #6b5a2e;',
-      ].join(';');
-      btn.addEventListener('click', onClick);
-      vrow.appendChild(btn);
-    };
-    mkVBtn('계속 싸운다 無限', true, () => this.continueEndless());
-    mkVBtn('결과 보기 結果', false, () => this.finish(true));
-    this.victoryOverlay.appendChild(vrow);
-    document.body.appendChild(this.victoryOverlay);
   }
 
   private flashDamage(peak: number, durationMs: number): void {
@@ -438,6 +408,7 @@ export class Run {
     this.map.reset();
     this.gateBreachFx.reset();
     this.gateRushTimer = 0;
+    this.hulaoAt = 420 + rng.range(0, 120); // 7~9분 사이 호로관 세트피스 1회
     this.playerWallHits = 0;
     this.lastAttackWeapon = '';
     this.lastAttackX = 0;
@@ -468,13 +439,11 @@ export class Run {
     this.musouStrength = 0;
     this.relicIds = [];
     this.endless = false;
-    this.victoryChoiceShown = false;
     this.victoryAchieved = false;
     this.forceRelicNext = false;
     this.feverWasOn = false;
     this.heroQuoteCursor = 0;
     this.nextHeroQuoteAt = 12;
-    this.victoryOverlay.style.display = 'none';
     this.hud.setFever(false);
     // 메타: 부활 + 시작 레벨
     this.reviveAvailable = this.meta?.revive ?? false;
@@ -549,7 +518,7 @@ export class Run {
     }
 
     // 종료/선택 상태: 오버레이가 위에 뜬 채 마지막 프레임을 정지(버튼은 DOM으로 동작).
-    if (this.state === 'dead' || this.state === 'victory' || this.state === 'victoryChoice') return;
+    if (this.state === 'dead' || this.state === 'victory') return;
 
     if (this.state === 'levelup') {
       if (this.input.consumePressed('Digit1')) this.pickCard(0);
@@ -617,6 +586,14 @@ export class Run {
 
     // 보스 스케줄
     this.checkBossSpawn();
+
+    // 호로관 파성 세트피스 (7~9분 1회). 오픈필드에 잠깐 성문이 솟는다.
+    if (this.hulaoAt > 0 && this.gameTime >= this.hulaoAt && !this.map.hulaoOn && !this.map.isGateBreached()) {
+      this.hulaoAt = 0;
+      this.map.triggerHulao(this.player.x, this.player.z);
+      this.hud.banner('호로관 출현 虎牢關', '#ffb05a', 48, 1800);
+      audio.sfx('warn');
+    }
 
     this.spawner.setBossActive(this.boss.active);
     this.spawner.update(edt, this.gameTime, this.player.x, this.player.z);
@@ -757,7 +734,7 @@ export class Run {
 
     // 종료 판정 (사망 → 부활 또는 결과, 10분 도달 → 승리 선택)
     if (this.player.dead) this.onPlayerDeath();
-    else if (!this.endless && !this.victoryChoiceShown && this.gameTime >= RUN_LENGTH) this.showVictoryChoice();
+    else if (!this.endless && this.gameTime >= RUN_LENGTH) this.finish(true);
     // 종료된 프레임은 HUD 갱신 생략(숨김 상태 유지).
     if (this.ended) return;
 
@@ -1188,22 +1165,15 @@ export class Run {
     this.finish(this.victoryAchieved); // 무한 모드 중 사망도 승리로 처리(10분 도달)
   }
 
-  // 10분 도달: 승리 선택 오버레이(계속 싸운다 / 결과 보기).
-  private showVictoryChoice(): void {
-    this.victoryChoiceShown = true;
-    this.victoryAchieved = true;
-    this.state = 'victoryChoice';
-    this.rig.addTrauma(0.4);
-    audio.sfx('achievement');
-    this.hud.banner('天下統一', '#ffe9a8', 90, 1600);
-    this.victoryOverlay.style.display = 'flex';
-  }
-
-  // 무한 모드 진입: 계속 전투(스케일 무한 증가).
-  private continueEndless(): void {
+  // 결과 화면 "계속 싸운다" → 현재 런을 무한 모드로 이어감 (App/phase3-ui가 호출).
+  // 풀은 리셋하지 않으므로 10분 시점 전황이 그대로 이어진다.
+  resumeEndless(): void {
+    if (this.endless) return;
     this.endless = true;
-    this.victoryOverlay.style.display = 'none';
+    this.ended = false;
+    this.victoryAchieved = true;
     this.state = 'play';
+    this.hud.setVisible(true);
     this.hud.banner('무한 전투 無限', '#e85c4a', 56, 1600);
     audio.playBgm('battle');
   }
@@ -1229,7 +1199,7 @@ export class Run {
   private finish(victory: boolean): void {
     if (this.ended) return;
     this.ended = true;
-    this.victoryOverlay.style.display = 'none';
+    if (victory && !this.endless && this.gameTime >= RUN_LENGTH) this.victoryAchieved = true;
     this.hud.setFever(false);
     this.state = victory ? 'victory' : 'dead';
     if (victory) {
@@ -1253,6 +1223,7 @@ export class Run {
       passives: Object.keys(this.passives).map((id) => ({ id, level: this.passives[id] })),
       bosses: Array.from(this.bossesKilled),
       endless: this.endless,
+      canContinue: victory && !this.endless && this.gameTime >= RUN_LENGTH,
     };
     this.hooks.onEnd(result);
   }
@@ -1365,12 +1336,17 @@ export class Run {
   testSetInvulnerable(seconds = 60): void {
     this.player.invuln = Math.max(this.player.invuln, seconds);
   }
+  testTriggerHulao(): void {
+    this.map.triggerHulao(this.player.x, this.player.z);
+  }
   testPrimeGate(): void {
+    if (!this.map.hulaoOn) this.map.triggerHulao(this.player.x, this.player.z);
     this.map.primeGate();
   }
   testBreachGate(): void {
+    if (!this.map.hulaoOn) this.map.triggerHulao(this.player.x, this.player.z);
     this.map.primeGate();
-    const gate = this.map.gates.find((candidate) => candidate.key === 'origin-north');
+    const gate = this.map.gates.find((candidate) => candidate.key === 'hulao');
     if (!gate) return;
     const breached = this.map.recordKillAt(gate.x, gate.z);
     if (breached) this.onGateBreached(breached);
@@ -1383,7 +1359,6 @@ export class Run {
   // 무한 모드 즉시 진입 (10분 승리 후 계속)
   testEnterEndless(): void {
     this.victoryAchieved = true;
-    this.victoryChoiceShown = true;
     this.endless = true;
     if (this.gameTime < 601) this.gameTime = 601;
   }

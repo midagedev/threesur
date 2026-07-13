@@ -34,6 +34,7 @@ export class BattlefieldEvents {
   private rush4 = false;
   private rush7 = false;
   private meteorCooldown = 0;
+  private busyT = 0; // 이벤트 점유 시간(비중첩용)
 
   // 진행 중 러시
   private rushRemaining = 0;
@@ -62,30 +63,34 @@ export class BattlefieldEvents {
     this.rush4 = false;
     this.rush7 = false;
     this.meteorCooldown = 0;
+    this.busyT = 0;
     this.rushRemaining = 0;
     this.showerRemaining = 0;
     this.mActive.fill(0);
   }
 
   update(dt: number, gameTime: number): void {
-    // === 트리거 ===
-    if (this.cartFired < this.cartTimes.length && gameTime >= this.cartTimes[this.cartFired]) {
+    // === 트리거 (한 번에 한 종류만 — 산만함 축소) ===
+    if (this.busyT > 0) this.busyT -= dt;
+    const free = this.busyT <= 0;
+    if (free && this.cartFired < this.cartTimes.length && gameTime >= this.cartTimes[this.cartFired]) {
       this.cartFired++;
       this.spawnSupplyCart(gameTime);
-    }
-    if (!this.rush4 && gameTime >= 240) {
+      this.busyT = 14;
+    } else if (free && !this.rush4 && gameTime >= 240) {
       this.rush4 = true;
       this.startRush();
-    }
-    if (!this.rush7 && gameTime >= 420) {
+      this.busyT = 32;
+    } else if (free && !this.rush7 && gameTime >= 420) {
       this.rush7 = true;
       this.startRush();
-    }
-    if (gameTime >= 360) {
+      this.busyT = 32;
+    } else if (free && gameTime >= 360) {
       this.meteorCooldown -= dt;
       if (this.meteorCooldown <= 0 && this.showerRemaining <= 0) {
         this.meteorCooldown = this.d.rng.range(35, 55);
         this.startMeteorShower();
+        this.busyT = 16;
       }
     }
 

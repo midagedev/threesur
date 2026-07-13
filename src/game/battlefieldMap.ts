@@ -91,8 +91,11 @@ export class BattlefieldMap {
 
   private readonly colliders: Collider[] = [];
   private readonly breached = new Set<string>();
-  private centerX = Number.NaN;
-  private centerZ = Number.NaN;
+  // 오픈필드가 기본. 성벽/게이트는 호로관 세트피스 동안만 존재.
+  private hulaoActive = false;
+  private hulaoTimer = 0;
+  private hulaoX = 0;
+  private hulaoZ = 0;
   private playerX = 0;
   private playerZ = 0;
   private flowOriginX = 0;
@@ -106,13 +109,12 @@ export class BattlefieldMap {
   update(playerX: number, playerZ: number, dt: number): void {
     this.playerX = playerX;
     this.playerZ = playerZ;
-    const cx = Math.round(playerX / MAP_CHUNK);
-    const cz = Math.round(playerZ / MAP_CHUNK);
-    if (cx !== this.centerX || cz !== this.centerZ) {
-      this.centerX = cx;
-      this.centerZ = cz;
-      this.rebuild();
-      this.flowTimer = 0;
+    // 오픈필드: 성벽 없음. 호로관 세트피스 동안만 성벽/게이트 + flow-field 유지.
+    if (!this.hulaoActive) return;
+    this.hulaoTimer -= dt;
+    if (this.hulaoTimer <= 0 || this.breached.has('hulao')) {
+      this.endHulao();
+      return;
     }
     this.flowTimer -= dt;
     const tx = Math.floor(playerX / FLOW_CELL);
@@ -129,9 +131,31 @@ export class BattlefieldMap {
     this.breached.clear();
     this.breachCount = 0;
     this.gateKills = 0;
-    this.centerX = Number.NaN;
-    this.centerZ = Number.NaN;
-    this.update(0, 0, 0);
+    this.hulaoActive = false;
+    this.hulaoTimer = 0;
+    this.rebuild(); // 오픈필드로 초기화(모든 지형 배열 비움)
+  }
+
+  // 호로관 세트피스 시작: 플레이어 북쪽에 성문 벽을 세운다(제한 시간 또는 파성 시 소멸).
+  triggerHulao(px: number, pz: number, durationSec = 45): void {
+    this.hulaoActive = true;
+    this.hulaoX = px;
+    this.hulaoZ = pz - 14;
+    this.hulaoTimer = durationSec;
+    this.gateKills = 0;
+    this.breached.delete('hulao');
+    this.rebuild();
+    this.rebuildFlow();
+  }
+
+  private endHulao(): void {
+    this.hulaoActive = false;
+    this.rebuild();
+    this.revision++;
+  }
+
+  get hulaoOn(): boolean {
+    return this.hulaoActive;
   }
 
   private rebuild(): void {
@@ -140,17 +164,26 @@ export class BattlefieldMap {
     this.props.length = 0;
     this.gates.length = 0;
     this.colliders.length = 0;
-    const ccx = this.centerX;
-    const ccz = this.centerZ;
-    for (let dz = -ACTIVE_RADIUS; dz <= ACTIVE_RADIUS; dz++) {
-      for (let dx = -ACTIVE_RADIUS; dx <= ACTIVE_RADIUS; dx++) {
-        const cx = ccx + dx;
-        const cz = ccz + dz;
-        const visible = Math.abs(dx) <= RENDER_RADIUS && Math.abs(dz) <= RENDER_RADIUS;
-        this.buildChunk(cx, cz, visible);
-      }
-    }
+    if (this.hulaoActive) this.buildHulao();
     this.revision++;
+  }
+
+  // 호로관 성문: 가로 성벽 한 줄 + 중앙 게이트(파성 전까지 콜라이더). 세트피스 전용.
+  private buildHulao(): void {
+    const gx = this.hulaoX;
+    const gz = this.hulaoZ;
+    const span = 20; // 성벽 반폭
+    const gateHalf = MAP_GATE_WIDTH * 0.5;
+    const segLen = span - gateHalf;
+    this.addWall(gx - gateHalf - segLen * 0.5, gz, segLen, WALL_THICKNESS, true, true);
+    this.addWall(gx + gateHalf + segLen * 0.5, gz, segLen, WALL_THICKNESS, true, true);
+    this.gates.push({ key: 'hulao', x: gx, z: gz, horizontal: true, visible: true });
+    if (!this.breached.has('hulao')) {
+      this.colliders.push({ x: gx, z: gz, hx: gateHalf, hz: WALL_THICKNESS * 0.5, gateKey: 'hulao' });
+    }
+    // 성문 양옆 망루
+    this.props.push({ x: gx - span, z: gz, kind: 10, width: 5, height: 5 });
+    this.props.push({ x: gx + span, z: gz, kind: 10, width: 5, height: 5 });
   }
 
   private buildChunk(cx: number, cz: number, visible: boolean): void {
@@ -310,8 +343,8 @@ export class BattlefieldMap {
   }
 
   recordKillAt(x: number, z: number): GateBarrier | null {
-    if (this.breached.has('origin-north')) return null;
-    const gate = this.gates.find((candidate) => candidate.key === 'origin-north');
+    if (!this.hulaoActive || this.breached.has('hulao')) return null;
+    const gate = this.gates.find((candidate) => candidate.key === 'hulao');
     if (!gate) return null;
     const dx = x - gate.x;
     const dz = z - gate.z;
@@ -322,10 +355,10 @@ export class BattlefieldMap {
   }
 
   primeGate(): void {
-    if (!this.breached.has('origin-north')) this.gateKills = 11;
+    if (!this.breached.has('hulao')) this.gateKills = 11;
   }
 
-  isGateBreached(key = 'origin-north'): boolean {
+  isGateBreached(key = 'hulao'): boolean {
     return this.breached.has(key);
   }
 
@@ -371,6 +404,11 @@ export class BattlefieldMap {
   }
 
   flowDirection(x: number, z: number, targetX: number, targetZ: number, out: { x: number; z: number }): void {
+    if (!this.hulaoActive) {
+      // 오픈필드: 곧장 플레이어로 추적(flow-field 불필요).
+      this.directDirection(x, z, targetX, targetZ, out);
+      return;
+    }
     const gx = Math.floor((x - this.flowOriginX) / FLOW_CELL);
     const gz = Math.floor((z - this.flowOriginZ) / FLOW_CELL);
     if (gx < 1 || gz < 1 || gx >= FLOW_SIZE - 1 || gz >= FLOW_SIZE - 1) {
