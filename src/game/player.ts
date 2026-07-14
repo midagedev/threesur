@@ -98,6 +98,17 @@ export class Player {
   dashDirZ = 1;
   private knbX = 0; // 적탄 피격 넛지(#44) — 위치 기반 감쇠 넉백
   private knbZ = 0;
+  // #45 19.1 드리프트 미니터보. 비드리프트 대시는 아래 로직 전부 무발동 → 기존과 완전 동일(#28 보호).
+  private driftCharge = 0; // 대시 중 조향이 40°↑ 벌어진 누적 시간
+  private driftSteerX = 0;
+  private driftSteerZ = 1;
+  private boostT = 0; // 대시 후 미니터보 잔여
+  private boostMul = 1;
+  private boostDirX = 0;
+  private boostDirZ = 1;
+  boostTier = 0; // 1=1단 / 2=2단 (run 이펙트 강도)
+  justSkid = false; // 드리프트 스키드/말발굽 불꽃 트리거 (run이 소비)
+  justBoost = false; // 미니터보 방출 트리거 (run이 소비)
 
   nudge(dirX: number, dirZ: number, strength: number): void {
     this.knbX += dirX * strength;
@@ -106,6 +117,11 @@ export class Player {
 
   get dashing(): boolean {
     return this.dashT > 0;
+  }
+
+  // #45 19.6: 미니터보 부스트 중 — 근접 히트 스매시 판정용.
+  get boosting(): boolean {
+    return this.boostT > 0;
   }
   get velX(): number {
     return this.vx;
@@ -279,6 +295,11 @@ export class Player {
     this.vz = 0;
     this.dashT = 0;
     this.dashCd = 0;
+    this.driftCharge = 0;
+    this.boostT = 0;
+    this.boostTier = 0;
+    this.justSkid = false;
+    this.justBoost = false;
     this.sqSX = 1;
     this.sqSY = 1;
     this.justDashed = false;
@@ -326,10 +347,36 @@ export class Player {
     // 속도 통합: 대시 오버라이드 / 가속 수렴 / 관성 감쇠
     const maxSp = this.baseSpeed * this.stats.speedMul;
     if (this.dashT > 0) {
+      // #45 19.1 드리프트 차지: 대시 중 조향이 40°↑ 벌어지면 누적(대시 속도·방향은 불변 → 손맛 회귀 없음).
+      if (inMove && nx * this.ddx + nz * this.ddz < 0.766) {
+        this.driftCharge += dt;
+        this.driftSteerX = nx;
+        this.driftSteerZ = nz;
+        this.justSkid = true;
+      }
       this.dashT -= dt;
       const ds = maxSp * DASH_SPEED_MUL;
       this.vx = this.ddx * ds;
       this.vz = this.ddz * ds;
+      if (this.dashT <= 0 && this.driftCharge >= 0.07) {
+        // 미니터보 방출: 1단(0.4s +30%) / 2단(0.6s +40%).
+        const tier2 = this.driftCharge >= 0.12;
+        this.boostT = tier2 ? 0.6 : 0.4;
+        this.boostMul = tier2 ? 1.4 : 1.3;
+        this.boostDirX = this.driftSteerX;
+        this.boostDirZ = this.driftSteerZ;
+        this.boostTier = tier2 ? 2 : 1;
+        this.justBoost = true;
+      }
+      if (this.dashT <= 0) this.driftCharge = 0;
+    } else if (this.boostT > 0) {
+      // 미니터보: 조향 방향으로 가속 오버라이드, 종료 시 일반 이동 복귀.
+      this.boostT -= dt;
+      const bs = maxSp * this.boostMul;
+      this.vx = this.boostDirX * bs;
+      this.vz = this.boostDirZ * bs;
+      this.faceX = this.boostDirX;
+      this.faceZ = this.boostDirZ;
     } else if (inMove) {
       this.faceX = nx;
       this.faceZ = nz;

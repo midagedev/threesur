@@ -689,6 +689,20 @@ export class Run {
       prevPlayerX, prevPlayerZ, this.player.x, this.player.z, this.player.radius, this.moveOut,
     )) this.playerWallHits++;
     this.player.setPosition(this.moveOut.x, this.moveOut.z);
+    // #45 19.1 드리프트 VFX — player가 세운 플래그 소비
+    if (this.player.justSkid) {
+      this.player.justSkid = false;
+      this.effects.spawnFlash(this.player.x, this.player.z, 1.6, 1.2, 0.4, 0.9);
+      this.particles.dust(this.player.x, this.player.z);
+    }
+    if (this.player.justBoost) {
+      this.player.justBoost = false;
+      const t2 = this.player.boostTier >= 2;
+      this.effects.spawnThrust(this.player.x, this.player.z, this.player.faceX, this.player.faceZ, t2 ? 6 : 4.5, t2 ? 2.2 : 1.6, 1.7, 1.35, 0.5, 0.24);
+      this.effects.spawnRing(this.player.x, this.player.z, t2 ? 4 : 2.8, 1.7, 1.3, 0.5, 0.4);
+      this.rig.punchFov(t2 ? 3 : 2);
+      audio.sfx('warn');
+    }
     this.map.update(this.player.x, this.player.z, 0);
     this.world.update();
 
