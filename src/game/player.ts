@@ -96,6 +96,13 @@ export class Player {
   justDashed = false; // run이 읽어 잔상/리본/카메라 펄스 트리거 (읽은 뒤 false로)
   dashDirX = 0;
   dashDirZ = 1;
+  private knbX = 0; // 적탄 피격 넛지(#44) — 위치 기반 감쇠 넉백
+  private knbZ = 0;
+
+  nudge(dirX: number, dirZ: number, strength: number): void {
+    this.knbX += dirX * strength;
+    this.knbZ += dirZ * strength;
+  }
 
   get dashing(): boolean {
     return this.dashT > 0;
@@ -338,6 +345,12 @@ export class Player {
     }
     this.x += this.vx * dt;
     this.z += this.vz * dt;
+    // 적탄 피격 넛지(#44): 이동 통합이 vx를 덮어쓰므로 위치 기반 감쇠 넉백
+    this.x += this.knbX * dt;
+    this.z += this.knbZ * dt;
+    const kbd = Math.exp(-8 * dt);
+    this.knbX *= kbd;
+    this.knbZ *= kbd;
 
     const spd = Math.hypot(this.vx, this.vz);
     this.moving = spd > 0.05;

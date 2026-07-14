@@ -392,8 +392,9 @@ export class EnemyPool {
               effects.spawnRing(xi, zi, 3.4, 1.5, 0.45, 2.5, 0.75);
               this.casterStarts++;
             } else {
-              effects.spawnRing(xi, zi, 2.8, 2.5, 1.2, 0.35, 0.55);
-              effects.spawnThrust(xi, zi, aimDx, aimDz, 10.5, 0.14, 2.4, 1.15, 0.28, 0.72);
+              // 발사 예고(#18.1): 마젠타 차지 링 + 조준 방향 thrust (아군 텔레그래프와 색 구분)
+              effects.spawnRing(xi, zi, 2.8, 1.9, 0.4, 2.3, 0.55);
+              effects.spawnThrust(xi, zi, aimDx, aimDz, 10.5, 0.14, 1.9, 0.4, 2.3, 0.72);
               this.volleyStarts++;
             }
             activePatterns++;
@@ -402,7 +403,12 @@ export class EnemyPool {
           this.patternT[i] -= dt;
           vx *= 0.05;
           vz *= 0.05;
-          this.flash[i] = Math.max(this.flash[i], 0.12);
+          // 차지 점증(#18.1): 발사가 가까울수록 스프라이트 플래시 강해짐 + 조준선 알파 점증.
+          const wd = behavior === BEHAVIOR_CASTER ? 0.92 : 0.72;
+          const charge = Math.min(1, Math.max(0, 1 - this.patternT[i] / wd));
+          this.flash[i] = Math.max(this.flash[i], 0.1 + charge * 0.5);
+          // 궁수(직선탄)만 조준선 — 회피 판단 창. 책사(유도)는 링 예고로 충분.
+          if (behavior !== BEHAVIOR_CASTER) enemyProj.aimLine(xi, zi, px, pz, charge);
           if (this.patternT[i] <= 0) {
             this.fireFan(i, xi, zi, enemyProj, behavior === BEHAVIOR_CASTER);
             this.patternState[i] = PATTERN_RECOVERY;
@@ -467,10 +473,12 @@ export class EnemyPool {
   private fireFan(i: number, x: number, z: number, enemyProj: EnemyProjectilePool, homing: boolean): void {
     const base = Math.atan2(this.aimZ[i], this.aimX[i]);
     const spread = homing ? 0.23 : 0.16;
+    // 탄속 -12%(#18.1): 예고를 보고 움직이면 피해지는 수준으로 완화(밀도 불변).
+    const speed = this.projSpeed[i] * 0.88;
     for (let k = -1; k <= 1; k++) {
       const a = base + spread * k;
       enemyProj.spawn(
-        x, z, Math.cos(a), Math.sin(a), this.projSpeed[i], this.projDamage[i], homing,
+        x, z, Math.cos(a), Math.sin(a), speed, this.projDamage[i], homing,
         homing ? EK_STRATEGIST : EK_ARROW,
       );
     }

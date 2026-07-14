@@ -21,6 +21,7 @@ type SfxKind =
   | 'bossHorn'
   | 'evolve'
   | 'playerHit'
+  | 'playerHitProj' // 적 원거리탄 피격 (둔탁·저역, playerHit과 구분 — DESIGN 18.3)
   | 'revive'
   | 'uiClick'
   | 'relic' // 저주 유물 획득
@@ -276,6 +277,11 @@ class AudioSystem {
         break;
       case 'playerHit':
         this.playThud(t);
+        break;
+      case 'playerHitProj':
+        // 둔탁한 저역 임팩트 — 적탄 피격 전용(playerHit 툭보다 낮고 뭉근하게)
+        this.playBlip(t, 92, 0.11, 'sine', 0.30);
+        this.playBlip(t + 0.012, 128, 0.07, 'triangle', 0.16);
         break;
       case 'revive':
         this.playGong(t, 523, 2.2, 0.4);

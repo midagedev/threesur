@@ -1085,7 +1085,7 @@ export class Run {
     }
   }
 
-  private readonly onPlayerHit = (dmg: number): boolean => {
+  private readonly onPlayerHit = (dmg: number, dirX = 0, dirZ = 0): boolean => {
     if (this.player.takeDamage(dmg)) {
       this.hitstop(90, 0.05);
       this.rig.addTrauma(0.62);
@@ -1093,7 +1093,14 @@ export class Run {
       this.player.hurtFlash();
       this.postfx?.pulseAberration(0.85);
       this.musou.addHit();
-      audio.sfx('playerHit');
+      if (dirX !== 0 || dirZ !== 0) {
+        // 적 원거리탄 피격(#44 18.3): 방향성 넛지 + 소형 트라우마 + 전용 둔탁 SFX
+        this.player.nudge(dirX, dirZ, 2.4);
+        this.rig.addTrauma(0.15);
+        audio.sfx('playerHitProj');
+      } else {
+        audio.sfx('playerHit'); // 접촉 등 무방향 피격
+      }
     }
     return true;
   };

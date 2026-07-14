@@ -52,6 +52,14 @@ export class EnemyProjectilePool {
   // 적탄 지면 위험 표식: 붉은 점 그림자로 위치를 바닥에 항상 찍는다(피할 대상이 제일 잘 보이게).
   private readonly dots: InstancedMesh;
   private readonly dotArr: Float32Array;
+  // 발사 예고 조준선(#18.1): 사수→플레이어 지면 마젠타 라인. 즉시모드(매 프레임 enemies가 push),
+  // render에서 그린 뒤 카운트 리셋. 동시 표시 상한 AIM_CAP.
+  private static readonly AIM_CAP = 8;
+  private readonly aimLines: InstancedMesh;
+  private readonly aimMatArr: Float32Array;
+  private readonly aimChargeArr: Float32Array;
+  private readonly aimChargeAttr: InstancedBufferAttribute;
+  private aimN = 0;
 
   constructor(scene: Scene) {
     for (let i = 0; i < CAP; i++) this.free[i] = CAP - 1 - i;
@@ -89,19 +97,23 @@ export class EnemyProjectilePool {
         varying float vKind;
         void main() {
           vec2 p = vUv - 0.5;
-          float b;
           if (vKind < 0.5) {
-            float body = smoothstep(1.0, 0.4, abs(p.y)*2.0);
+            // 적 궁수 화살(#18.2): 몸통+머리 + 중심선 마젠타 핫코어. 야간 지면서 1순위로 읽히게 강하게 태움.
+            float across = abs(p.y) * 2.0;
+            float body = smoothstep(1.0, 0.4, across);
             float head = smoothstep(0.2, 1.0, vUv.x);
-            b = body * (0.4 + head);
+            float b = body * (0.4 + head);
+            if (b <= 0.01) discard;
+            float core = smoothstep(0.45, 0.0, across) * head;
+            vec3 col = mix(vColor, vec3(2.7, 1.3, 2.5), core * 0.65);
+            gl_FragColor = vec4(col * b * 0.62, b * 0.5);
           } else {
             float r = length(p) * 2.0;
             float pulse = 0.8 + 0.2 * sin(uTime * 12.0);
-            b = smoothstep(1.0, 0.0, r) * pulse;
+            float b = smoothstep(1.0, 0.0, r) * pulse;
+            if (b <= 0.01) discard;
+            gl_FragColor = vec4(vColor * b * 0.42, b * 0.34);
           }
-          if (b <= 0.01) discard;
-          // 적탄은 "피해야 할 대상" — 후광을 아군보다 또렷하게(0.42) 태워 위험을 강조.
-          gl_FragColor = vec4(vColor * b * 0.42, b * 0.34);
         }
       `,
       transparent: true,
@@ -152,6 +164,47 @@ export class EnemyProjectilePool {
     this.dots.renderOrder = 1; // 지면
     this.dotArr = this.dots.instanceMatrix.array as Float32Array;
     scene.add(this.dots);
+
+    // 발사 예고 조준선(마젠타 지면 라인). 길이 방향으로 페이드, 끝(플레이어 쪽) 화살촉 느낌.
+    const aimGeo = new PlaneGeometry(1, 1);
+    aimGeo.rotateX(-Math.PI / 2);
+    this.aimChargeArr = new Float32Array(EnemyProjectilePool.AIM_CAP);
+    this.aimChargeAttr = new InstancedBufferAttribute(this.aimChargeArr, 1);
+    this.aimChargeAttr.setUsage(DynamicDrawUsage);
+    aimGeo.setAttribute('aCharge', this.aimChargeAttr);
+    const aimMat = new ShaderMaterial({
+      vertexShader: /* glsl */ `
+        attribute float aCharge;
+        varying vec2 vUv;
+        varying float vCharge;
+        void main() { vUv = uv; vCharge = aCharge; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        varying float vCharge;
+        void main() {
+          // 가로(vUv.x)=사수→플레이어, 세로(vUv.y)=폭. 중심선 얇게 + 양끝 페이드(플레이어 수렴 블롭 방지).
+          float across = abs(vUv.y - 0.5) * 2.0;
+          float line = smoothstep(1.0, 0.0, across);
+          float ends = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.86, vUv.x);
+          float a = line * ends * vCharge * 0.3; // 알파 상한 0.3 (시각 소음 억제)
+          if (a <= 0.004) discard;
+          gl_FragColor = vec4(vec3(1.9, 0.35, 2.2) * a * 1.3, a); // 마젠타
+        }
+      `,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      depthTest: true,
+    });
+    this.aimLines = new InstancedMesh(aimGeo, aimMat, EnemyProjectilePool.AIM_CAP);
+    this.aimLines.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.aimLines.frustumCulled = false;
+    this.aimLines.count = 0;
+    this.aimLines.renderOrder = 2; // 지면 위험점보다 위, 스프라이트 아래
+    this.aimMatArr = this.aimLines.instanceMatrix.array as Float32Array;
+    scene.add(this.aimLines);
+
     this.spriteBatches = [
       new RetroProjectileBatch(scene, 'enemy-arrow', CAP, 5, 0.92), // 기본 궁수: 깔끔한 단발 화살
       new RetroProjectileBatch(scene, 'enemy-orb', CAP, 5, 0.92), // 책사 마탄: 어두운 구체(플레이어 부적과 구분)
@@ -182,6 +235,33 @@ export class EnemyProjectilePool {
     this.alive.fill(0);
     for (let i = 0; i < CAP; i++) this.free[i] = CAP - 1 - i;
     this.freeTop = CAP;
+    this.aimN = 0;
+    this.aimLines.count = 0;
+  }
+
+  // 발사 예고 조준선 push (즉시모드 — enemies 사수 윈드업이 매 프레임 호출, render에서 그린 뒤 리셋).
+  // charge 0..1: 차지 진행도(알파 점증). 동시 표시 AIM_CAP개 상한.
+  aimLine(x1: number, z1: number, x2: number, z2: number, charge: number): void {
+    if (this.aimN >= EnemyProjectilePool.AIM_CAP) return;
+    const dx = x2 - x1;
+    const dz = z2 - z1;
+    const len = Math.hypot(dx, dz) || 0.001;
+    const theta = Math.atan2(-dz, dx);
+    const ct = Math.cos(theta);
+    const st = Math.sin(theta);
+    const width = 0.42;
+    const m = this.aimN * 16;
+    this.aimMatArr[m] = ct * len;
+    this.aimMatArr[m + 2] = -st * len;
+    this.aimMatArr[m + 5] = 1;
+    this.aimMatArr[m + 8] = st * width;
+    this.aimMatArr[m + 10] = ct * width;
+    this.aimMatArr[m + 12] = (x1 + x2) * 0.5;
+    this.aimMatArr[m + 13] = 0.06;
+    this.aimMatArr[m + 14] = (z1 + z2) * 0.5;
+    this.aimMatArr[m + 15] = 1;
+    this.aimChargeArr[this.aimN] = charge;
+    this.aimN++;
   }
 
   spawn(
@@ -209,7 +289,7 @@ export class EnemyProjectilePool {
     switch (safeKind) {
       case EK_STRATEGIST:
         this.cr[i] = 1.55; this.cg[i] = 0.5; this.cb[i] = 2.25;
-        this.size[i] = 1.05; this.radius[i] = 0.4; this.turn[i] = 3.0;
+        this.size[i] = 1.26; this.radius[i] = 0.4; this.turn[i] = 3.0; // 크기 +20% (#18.2)
         break;
       case EK_FIREBALL:
         this.cr[i] = 2.5; this.cg[i] = 0.65; this.cb[i] = 0.18;
@@ -229,9 +309,9 @@ export class EnemyProjectilePool {
         this.size[i] = 1.7; this.radius[i] = 0.65; this.turn[i] = 0;
         break;
       default:
-        // 적 기본 궁수 = 진홍(아군 금색 화살과 구분).
-        this.cr[i] = 2.5; this.cg[i] = 0.5; this.cb[i] = 0.38;
-        this.size[i] = 1.3; this.radius[i] = 0.3; this.turn[i] = 0;
+        // 적 기본 궁수 = 마젠타 코어+진홍 글로우(야간 지면서 1순위 시인, 아군 금색 화살과 구분). 크기 +20% (#18.2)
+        this.cr[i] = 2.5; this.cg[i] = 0.4; this.cb[i] = 1.7;
+        this.size[i] = 1.56; this.radius[i] = 0.34; this.turn[i] = 0;
         break;
     }
     this.alive[i] = 1;
@@ -242,7 +322,7 @@ export class EnemyProjectilePool {
     px: number,
     pz: number,
     playerR: number,
-    hitPlayer: (dmg: number) => boolean,
+    hitPlayer: (dmg: number, dirX: number, dirZ: number) => boolean,
     particles: ParticleSystem,
     effects: EffectsSystem,
   ): void {
@@ -279,7 +359,11 @@ export class EnemyProjectilePool {
           const ring = this.kind[i] === EK_HEAVY ? 2.1 : this.kind[i] === EK_FIREBALL ? 1.65 : 1.25;
           effects.spawnRing(this.x[i], this.z[i], ring, this.cr[i], this.cg[i], this.cb[i], 0.24);
         }
-        hitPlayer(this.damage[i]);
+        // 방향성 스파크 버스트(탄 색) — 어디서 맞았는지 체감 (#18.3)
+        particles.burst(this.x[i], this.z[i], this.cr[i], this.cg[i], this.cb[i], 9, 5.5);
+        // 피격 방향 = 탄 진행 방향 → run이 플레이어 넉백 넛지에 사용
+        const sp = Math.hypot(this.vx[i], this.vz[i]) || 1;
+        hitPlayer(this.damage[i], this.vx[i] / sp, this.vz[i] / sp);
         this.alive[i] = 0;
         this.free[this.freeTop++] = i;
         continue;
@@ -335,9 +419,9 @@ export class EnemyProjectilePool {
       this.spriteBatches[this.kind[i]].push(
         this.x[i], 1.055, this.z[i], theta, artScaleX, artScaleZ, 1,
       );
-      // 붉은 지면 위험 점(투사체보다 살짝 크게, 위치 표기)
+      // 붉은 지면 위험 점(투사체보다 살짝 크게, 위치 표기 — 추적성 강화 #18.2)
       const dm = w * 16;
-      const dsize = (this.radius[i] + 0.55) * 2;
+      const dsize = (this.radius[i] + 0.68) * 2;
       this.dotArr[dm] = dsize;
       this.dotArr[dm + 5] = 1;
       this.dotArr[dm + 10] = dsize;
@@ -354,5 +438,11 @@ export class EnemyProjectilePool {
     this.dots.count = w;
     this.dots.instanceMatrix.needsUpdate = true;
     for (const batch of this.spriteBatches) batch.end();
+
+    // 발사 예고 조준선 (이번 프레임 push분) 렌더 → 카운트 리셋(다음 프레임 새로 push)
+    this.aimLines.count = this.aimN;
+    this.aimLines.instanceMatrix.needsUpdate = true;
+    this.aimChargeAttr.needsUpdate = true;
+    this.aimN = 0;
   }
 }
