@@ -74,6 +74,8 @@ canvas {
   width: min(94vw, 960px);
   max-height: 92vh;
   overflow-y: auto;
+  /* iOS: 자체 스크롤 컨테이너라 body의 touch-action:none이 안 미침 — 세로 팬만 허용(더블탭/핀치 줌 차단) */
+  touch-action: pan-y;
   padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 16px);
   text-align: center;
   scrollbar-width: thin;

@@ -187,6 +187,17 @@ loadAtlas()
     window.addEventListener('pointerdown', wakeAudio, { once: true });
     window.addEventListener('keydown', wakeAudio, { once: true });
 
+    // iOS 사파리는 viewport user-scalable=no를 무시 — 핀치/더블탭 줌 JS 차단 (터치 게임 필수).
+    document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
+    document.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', (e) => {
+      const now = performance.now();
+      // 320ms 내 재탭 = 더블탭 줌 제스처 — 기본 동작만 차단(포인터 이벤트는 이미 발화돼 조작 무영향)
+      if (now - lastTouchEnd < 320 && e.cancelable) e.preventDefault();
+      lastTouchEnd = now;
+    }, { passive: false });
+
     // Esc: 일시정지 화면에서 계속 (run 시뮬레이션은 정지 중이라 App이 처리).
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Escape' && scene === 'pause') resumeRun();
