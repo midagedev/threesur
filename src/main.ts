@@ -295,6 +295,7 @@ loadAtlas()
       showProjectiles: () => run.testSpawnProjectileShowcase(),
       showEnemyProjectiles: () => run.testSpawnEnemyProjectileShowcase(),
       musouFx: () => run.testMusouFx(),
+      shrineBuff: (kind?: string, dur?: number) => run.testShrineBuff(kind, dur),
       spawnBoss: (t: string) => run.testSpawnBoss(t),
       setBossFlags: (b3: boolean, b6: boolean, b9: boolean) => run.testSetBossFlags(b3, b6, b9),
       treasure: (boss?: boolean) => run.testTreasure(boss),

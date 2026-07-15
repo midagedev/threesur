@@ -1083,7 +1083,8 @@ export class Run {
     this.feverWasOn = fever;
     this.effects.update(dt);
     this.arrowRain.update(dt);
-    this.starAura.update(dt, this.player.x, this.player.z, this.player.shrineBuffActive); // 사당 스타파워 오라(#50 폴리시)
+    this.starAura.update(dt, this.player.x, this.player.z, this.player.shrineBuffActive,
+      this.atlas.sgrade, this.player.frameUv.u, this.player.frameUv.v); // 사당 스타파워 오라 — 캐릭터 실루엣 아웃라인(#51)
     this.lightField.update(dt);
     this.decals.update(dt);
     this.updateLowHp(dt);
@@ -1990,6 +1991,10 @@ export class Run {
   testForceLevel(): void {
     this.xp += this.nextXp;
     this.onCollect(0);
+  }
+  // QA/시각검증용: 사당 버프 강제 부여 → 스타파워 실루엣 아웃라인 오라(#51) 검증.
+  testShrineBuff(kind = 'attack', dur = 30): void {
+    this.player.applyBuff(kind as 'attack' | 'speed' | 'musou', dur);
   }
   testFillMusou(): void {
     this.musou.gauge = 100;

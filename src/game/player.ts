@@ -270,6 +270,10 @@ export class Player {
   get shrineBuffActive(): boolean {
     return this.buffAttackT > 0 || this.buffSpeedT > 0 || this.buffMusouT > 0;
   }
+  // 현재 프레임 UV 오프셋(방향/애니메이션 반영, 매프레임 player.update가 갱신) — StarAura 실루엣 아웃라인용(#51).
+  get frameUv(): { u: number; v: number } {
+    return this.uv;
+  }
 
   // 패시브 변경 시 호출: 스탯 재계산 + 최대체력 반영(현재 비율 유지).
   recomputeStats(passives: Record<string, number>): void {
