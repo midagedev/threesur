@@ -9,6 +9,7 @@ import { GateBreachFx } from '../gfx/gateBreachFx';
 import { InstancedSpriteRenderer, ShadowRenderer } from '../gfx/sprites';
 import { EffectsSystem } from '../gfx/effects';
 import { ArrowRain } from '../gfx/arrowRain';
+import { StarAura } from '../gfx/starAura';
 import { ParticleSystem } from '../gfx/particles';
 import { DamageText } from '../gfx/damageText';
 import { Labels } from '../gfx/labels';
@@ -152,6 +153,7 @@ export class Run {
   private readonly markers: MarkerLayer;
   private readonly gateBreachFx: GateBreachFx;
   private readonly arrowRain: ArrowRain;
+  private readonly starAura: StarAura;
 
   private readonly player: Player;
   private readonly companion: Companion;
@@ -266,6 +268,7 @@ export class Run {
 
     this.effects = new EffectsSystem(this.scene);
     this.arrowRain = new ArrowRain(this.scene, this.effects);
+    this.starAura = new StarAura(this.scene);
     this.decals = new DecalPool(this.scene);
     this.particles = new ParticleSystem(this.scene);
     this.damageText = new DamageText(this.scene);
@@ -632,6 +635,7 @@ export class Run {
     this.landmarks.reset();
     this.siegeEvents = { lordSpawn: 0, capture: 0, counter: 0, volley: 0, defended: 0, lost: 0 };
     this.gateBreachFx.reset();
+    this.starAura.reset();
     this.cinematics.reset();
     this.gateRushTimer = 0;
     this.hulaoAt = 420 + rng.range(0, 120); // 7~9분 사이 호로관 세트피스 1회
@@ -1050,6 +1054,7 @@ export class Run {
     this.feverWasOn = fever;
     this.effects.update(dt);
     this.arrowRain.update(dt);
+    this.starAura.update(dt, this.player.x, this.player.z, this.player.shrineBuffActive); // 사당 스타파워 오라(#50 폴리시)
     this.lightField.update(dt);
     this.decals.update(dt);
     this.updateLowHp(dt);

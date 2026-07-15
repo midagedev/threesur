@@ -266,6 +266,10 @@ export class Player {
   get musouBuffed(): boolean {
     return this.buffMusouT > 0;
   }
+  // 사당 버프(공격/이속/무쌍 중 하나라도) 활성 — 스타파워 오라 표시 조건(#50 폴리시).
+  get shrineBuffActive(): boolean {
+    return this.buffAttackT > 0 || this.buffSpeedT > 0 || this.buffMusouT > 0;
+  }
 
   // 패시브 변경 시 호출: 스탯 재계산 + 최대체력 반영(현재 비율 유지).
   recomputeStats(passives: Record<string, number>): void {
