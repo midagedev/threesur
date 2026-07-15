@@ -67,6 +67,7 @@ export function findNearestEnemy(
   pz: number,
   maxR: number,
   scratch: number[],
+  density = 0, // #47 동시 생존 적 수 — 보스 조준 duty를 밀도 비례로 상향(고밀도에서 보스 스펀지화 완화)
 ): number {
   const n = hash.query(px, pz, maxR, scratch);
   let best = -1;
@@ -94,8 +95,10 @@ export function findNearestEnemy(
   aimFrame++;
   if (bossBest >= 0) {
     const PERIOD = 200;
-    const BOSS_WINDOW = 90; // 200프레임 중 90 ≈ 45%가 보스 조준(투사체·근접 모두)
-    if (aimFrame % PERIOD < BOSS_WINDOW) return bossBest;
+    // #47 밀도 비례 보스 duty: 저밀도 45%(90/200) → 고밀도(≈150+ 동시) 65%(130/200)까지 상향.
+    // 6분+ 과밀 전장에선 비-보스 조준이 잡몹에 희석돼 보스가 스펀지화 → 밀도 높을수록 보스 조준 비중↑.
+    const bossWindow = 90 + Math.round(40 * Math.min(1, Math.max(0, density - 60) / 90));
+    if (aimFrame % PERIOD < bossWindow) return bossBest;
   }
   return best;
 }

@@ -547,6 +547,7 @@ export class Run {
   private lowHpBeat = 0;
   private damageVigLevel = 0; // #29: 관리형 피격 비네트 레벨(점멸 대신 유지+감쇠)
   private smallFlashCd = 0; // 소형 화면 플래시 쿨다운(스트로브 방지)
+  private flashActive = 0; // #47 화면 겹침 플래시 불투명도 합 — 누적 상한으로 연쇄 화이트아웃 방지
 
   // 매 프레임: 피격 비네트 감쇠 + 저체력 비네트/심박. (updateLowHp 호출부에서 매 프레임 구동)
   private updateLowHp(dt: number): void {
@@ -588,11 +589,20 @@ export class Run {
       this.smallFlashCd = 0.5;
       if (i > 0.06) i = 0.06;
     }
+    // #47 킬캠 플래시 누적 상한: 이미 떠 있는 플래시 합과 더해 CAP를 넘지 않게 클램프.
+    // (보스 처치+파성+연쇄 킬이 겹칠 때 독립 div가 가산돼 화이트아웃되던 문제 — onfinish에서 기여분 반환)
+    const FLASH_CAP = 0.5;
+    i = Math.min(i, FLASH_CAP - this.flashActive);
+    if (i <= 0.01) return;
+    const contrib = i;
+    this.flashActive += contrib;
     const el = document.createElement('div');
     el.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:31;background:rgba(200,220,255,1);';
     document.body.appendChild(el);
-    el.animate([{ opacity: i }, { opacity: 0 }], { duration: 120, easing: 'ease-out' }).onfinish =
-      () => el.remove();
+    el.animate([{ opacity: i }, { opacity: 0 }], { duration: 120, easing: 'ease-out' }).onfinish = () => {
+      el.remove();
+      this.flashActive -= contrib;
+    };
   }
 
   private hitstop(durationMs: number, scale = 0.05): void {
@@ -645,6 +655,7 @@ export class Run {
     this.lowHpBeat = 0;
     this.damageVigLevel = 0;
     this.smallFlashCd = 0;
+    this.flashActive = 0; // #47 누적 플래시 상한 리셋(잔여 div는 자체 onfinish로 소멸)
     this.damageFlash.style.opacity = '0';
     this.spawner.reset();
     this.combo.reset();
@@ -905,6 +916,7 @@ export class Run {
 
     const aimTarget = findNearestEnemy(
       this.enemies, this.hash, this.player.x, this.player.z, 22, this.scratch,
+      this.enemies.aliveCount, // #47 밀도 비례 보스 duty
     );
     this.ctx.aimTarget = aimTarget;
     this.ctx.aimX = this.player.faceX;
@@ -1996,6 +2008,10 @@ export class Run {
   testShrineBuff(kind = 'attack', dur = 30): void {
     this.player.applyBuff(kind as 'attack' | 'speed' | 'musou', dur);
   }
+  // QA: 화면 플래시를 한 프레임에 다발 발생 → 누적 상한(#47) 검증(상한 없으면 화이트아웃).
+  testFlashBurst(n = 6, each = 0.4): void {
+    for (let k = 0; k < n; k++) this.flashScreen(each);
+  }
   testFillMusou(): void {
     this.musou.gauge = 100;
   }
@@ -2177,6 +2193,9 @@ export class Run {
       passives: { ...this.passives },
       musou: this.musou.gauge,
       bossActive: this.boss.active,
+      bossHp01: this.boss.hpFrac(this.ctx), // #47 QA: 보스 HP 비율(직접 DPS 측정용)
+      bossX: this.boss.idx >= 0 ? this.enemies.x[this.boss.idx] : 0,
+      bossZ: this.boss.idx >= 0 ? this.enemies.z[this.boss.idx] : 0,
       companion: this.companion.active ? this.companion.definition.id : null,
       companionAttacks: this.companion.attacks,
       companionKills: this.companion.kills + this.companion2.kills,

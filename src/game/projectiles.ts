@@ -19,6 +19,14 @@ import type { LightUniforms } from '../gfx/lightField';
 const CAP = 384;
 const HITMAX = 8; // 관통 시 중복 타격 방지용 최근 타격 목록 크기
 
+// #47 원거리 보스딜 보정: 이전엔 투사체에 보스 배수가 전혀 없어 원거리 빌드가 보스에 melee 대비 무력(실측: 미처치).
+// melee(roster.ts BOSS_DMG_MULT=4.5)는 #40 보정(사거리+20·각도무시)으로 스윙마다 100% 보스 명중하지만,
+// 투사체는 조준 duty(~45%) 프레임에만 보스를 향해 발사돼 명중률이 구조적으로 ~2배 낮다.
+// 이 명중률 격차를 per-hit 배수로 보상 → 8배(pinned 실측 melee/ranged 비 3.7→~2, 실전 카이팅에선 원거리 유리).
+// 오빗(재타격형)은 지속 히트라 0.35만 적용해 과보정 방지. 그로기 보스는 +60%(melee와 동일).
+const BOSS_DMG_MULT = 8;
+const ORBIT_BOSS_SCALE = 0.35;
+
 // 시각 종류
 export const PK_ARROW = 0;
 export const PK_TALISMAN = 1;
@@ -338,7 +346,10 @@ export class ProjectilePool {
         if (dup) continue;
         if (cnt < HITMAX) this.hits[base + this.hitN[i]++] = j;
       }
-      const dmg = this.damage[i];
+      const isBoss = enemies.boss[j] === 1;
+      const dmg = isBoss
+        ? this.damage[i] * BOSS_DMG_MULT * (enemies.groggy[j] === 1 ? 1.6 : 1) * (isOrbit ? ORBIT_BOSS_SCALE : 1)
+        : this.damage[i];
       const died = enemies.damageAt(j, dmg);
       damageText.spawn(dmg, enemies.x[j], enemies.scale[j] * 0.7, enemies.z[j], false);
       particles.projectileImpact(
