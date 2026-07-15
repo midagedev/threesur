@@ -440,6 +440,7 @@ export class Run {
       this.siegeEvents.counter++;
       this.hud.banner(siegeBanner('counter'), '#e85c4a', 56, 1800, 1);
       audio.sfx('warn');
+      audio.playBgm('siege');
       this.rig.addTrauma(0.4);
     };
     this.siege.onVolley = (shots) => {
@@ -458,12 +459,15 @@ export class Run {
       this.musou.gauge = Math.min(100, this.musou.gauge + 50);
       this.rig.addTrauma(0.5);
       audio.sfx('levelup');
+      // 수성 중 정규 보스가 난입했을 수 있음 — 보스전 BGM은 유지
+      if (!this.boss.active) audio.playBgm('battle');
     };
     this.siege.onLost = () => {
       this.siegeEvents.lost++;
       this.hud.banner(siegeBanner('fallen'), '#c8322a', 56, 1800, 1);
       this.rig.addTrauma(0.6);
       audio.sfx('warn');
+      if (!this.boss.active) audio.playBgm('battle');
     };
 
     // 낙뢰 화면 미세 플래시 훅

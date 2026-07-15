@@ -6,6 +6,7 @@ const BGM_FILES: Record<string, string> = {
   title: 'bgm-title.mp3',
   battle: 'bgm-battle.mp3',
   boss: 'bgm-boss.mp3',
+  siege: 'bgm-siege.mp3', // 낙양 수성전 75s 전용(DESIGN 20.3) — 타악 주도 공성 긴장감
   victory: 'jingle-victory.mp3',
   defeat: 'jingle-defeat.mp3',
 };
