@@ -230,7 +230,9 @@ export class Hud {
       // 터치 기기: 조이스틱 엄지 영역(하단)과 겹치지 않게 체력/게이지 바를 위로 올린다(오너 피드백).
       `bottom:calc(env(safe-area-inset-bottom,0px) + ${this.touch ? '15vh' : '22px'})`,
       'left:0',
-      'right:0',
+      // 터치: 우측을 무쌍 버튼 폭(우22+92)만큼 비워 HP 바가 버튼 왼쪽 영역 중앙에 오게 한다
+      // (세로 화면에서 바 우측 끝이 무쌍 버튼과 겹치던 문제 — 오너 피드백. 가로는 넓어 영향 미미).
+      `right:${this.touch ? 'calc(env(safe-area-inset-right,0px) + 134px)' : '0'}`,
       'display:flex',
       'flex-direction:column',
       'align-items:center',
@@ -261,7 +263,7 @@ export class Hud {
 
     const hpBar = document.createElement('div');
     hpBar.style.cssText =
-      'width:min(60vw,420px);height:16px;background:rgba(20,22,30,0.85);border:1px solid rgba(232,198,103,0.35);border-radius:5px;overflow:hidden;position:relative;';
+      `width:${this.touch ? 'min(56vw,340px)' : 'min(60vw,420px)'};height:16px;background:rgba(20,22,30,0.85);border:1px solid rgba(232,198,103,0.35);border-radius:5px;overflow:hidden;position:relative;`;
     // 잔상 바(피격 시 흰 띠가 지연되며 따라 줄어듦) — 실제 HP 바 뒤에 깔린다.
     this.hpDelay = document.createElement('div');
     this.hpDelay.style.cssText =
