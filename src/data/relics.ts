@@ -289,6 +289,176 @@ export const MASTERWORK_DEFS: MasterworkDef[] = [
       s.maxHpMul *= 1.12;
     },
   },
+  // ── 확장 12종 (콘텐츠 팩 named.json 미사용 네임드 번안). 무기 편중 회피: 인장·병법서·갑주·궁·패옥 위주.
+  //    새 축 speedMul·dmgReduction 도입, 나머지는 기존 조합과 중복되지 않는 짝으로 서로 다른 빌드 시너지.
+  {
+    id: 'shuo',
+    name: '삭',
+    nameEn: 'Cavalry Lance',
+    hanja: '矟',
+    desc: '공격력 +15%, 이동속도 +10%',
+    descEn: 'Attack +15%, Move speed +10%',
+    lore: '한 길이 넘는 기병의 긴 모. 자루가 굵고 무거워 손목이 아니라 말의 기세로 휘두르니, 내리꽂으면 방패째 꿰뚫려 좀체 빠지지 않는다.',
+    loreEn: 'A cavalryman’s lance longer than a fathom. Too thick and heavy for the wrist, it is swung by the horse’s momentum — driven down, it pierces shield and all and will not easily pull free.',
+    apply: (s) => {
+      s.damageMul *= 1.15;
+      s.speedMul *= 1.1;
+    },
+  },
+  {
+    id: 'huanshou_dao',
+    name: '환수도',
+    nameEn: 'Ring-Pommel Saber',
+    hanja: '環首刀',
+    desc: '쿨다운 -10%, 공격력 +10%',
+    descEn: 'Cooldown -10%, Attack +10%',
+    lore: '자루 끝에 둥근 고리를 단 외날 곧은 칼. 화려할 것 없이 곧게 베고 곧게 찌르는 칼이라, 다룰 줄 아는 손에 쥐여 주면 군말 없이 제 몫을 한다.',
+    loreEn: 'A straight single-edged saber with a ring at the pommel. Nothing ornate — it cuts straight and thrusts straight, and in a capable hand it does its share without a word.',
+    apply: (s) => {
+      s.cooldownMul *= 0.9;
+      s.damageMul *= 1.1;
+    },
+  },
+  {
+    id: 'jiao_gong',
+    name: '각궁',
+    nameEn: 'Horn Composite Bow',
+    hanja: '角弓',
+    desc: '사거리·투사체 속도 +20%, 쿨다운 -8%',
+    descEn: 'Range & projectile speed +20%, Cooldown -8%',
+    lore: '물소뿔과 나무, 힘줄을 부레풀로 겹쳐 붙인 복합궁. 작은 몸피로도 세게 멀리 쏘아, 활을 다스릴 줄 아는 자의 사거리를 말없이 넓혀 준다.',
+    loreEn: 'A composite bow of horn, wood, and sinew laminated with fish glue. Small in the hand yet it shoots hard and far, quietly widening the reach of one who can master a bow.',
+    apply: (s) => {
+      s.rangeMul *= 1.2;
+      s.cooldownMul *= 0.92;
+    },
+  },
+  {
+    id: 'liangdang_kai',
+    name: '양당개',
+    nameEn: 'Two-Panel Cuirass',
+    hanja: '裲襠鎧',
+    desc: '받는 피해 -10%, 이동속도 +8%',
+    descEn: 'Damage taken -10%, Move speed +8%',
+    lore: '가슴과 등을 앞뒤 두 판으로 덮고 어깨끈으로 멘 갑. 옆구리가 가벼워 오래 걸어도 숨이 덜 차고, 빗겨 든 판이 화살을 곧잘 튕겨 흘려보낸다.',
+    loreEn: 'Armor of two plates over chest and back, slung from the shoulders. Light at the sides so the breath holds through a long march, its slanted plates readily glance arrows aside.',
+    apply: (s) => {
+      s.dmgReduction = Math.min(0.8, s.dmgReduction + 0.1);
+      s.speedMul *= 1.08;
+    },
+  },
+  {
+    id: 'zha_jia',
+    name: '찰갑',
+    nameEn: 'Lamellar Armor',
+    hanja: '札甲',
+    desc: '받는 피해 -12%, 최대 체력 +8%',
+    descEn: 'Damage taken -12%, Max HP +8%',
+    lore: '작은 미늘판 수천 장을 끈과 가죽으로 촘촘히 엮은 몸통 갑. 미늘이 서로 미끄러져 몸을 따라 움직이니, 잘 짜인 한 벌은 창끝을 틈으로 흘려보내 입은 자를 오래 살린다.',
+    loreEn: 'A cuirass of thousands of small scales laced tight with cord and leather. The scales slide over one another to follow the body — a well-made suit slips a spear-point through the gaps and keeps its wearer alive.',
+    apply: (s) => {
+      s.dmgReduction = Math.min(0.8, s.dmgReduction + 0.12);
+      s.maxHpMul *= 1.08;
+    },
+  },
+  {
+    id: 'zishou_jinyin',
+    name: '자수금인',
+    nameEn: 'Purple-Cord Gold Seal',
+    hanja: '紫綬金印',
+    desc: '골드 +35%, 경험치 +15%',
+    descEn: 'Gold +35%, XP +15%',
+    lore: '금 인장에 자줏빛 인끈을 꿰었다. 조정 상층의 격을 말없이 증언하는 물건으로, 끈의 빛깔 하나가 곧 명령이 되어 사람을 부린다.',
+    loreEn: 'A gold seal strung with a purple cord. It testifies in silence to the highest rank at court — the color of the cord alone becomes a command that moves men.',
+    apply: (s) => {
+      s.goldMul *= 1.35;
+      s.xpMul *= 1.15;
+    },
+  },
+  {
+    id: 'yin_yin',
+    name: '은인',
+    nameEn: 'Silver Seal',
+    hanja: '銀印',
+    desc: '골드 +25%, 최대 체력 +8%',
+    descEn: 'Gold +25%, Max HP +8%',
+    lore: '희게 닦인 은 인장에 푸른 인끈이 드리웠다. 군현을 다스리는 자의 표식이라, 이를 허리에 찬 자 앞에서는 아랫것의 말이 절로 낮아진다.',
+    loreEn: 'A polished silver seal hung with a blue cord. It is the token of one who governs a commandery — before its bearer, lesser tongues lower of their own accord.',
+    apply: (s) => {
+      s.goldMul *= 1.25;
+      s.maxHpMul *= 1.08;
+    },
+  },
+  {
+    id: 'jiuzhang_suanshu',
+    name: '구장산술',
+    nameEn: 'Nine Chapters',
+    hanja: '九章算術',
+    desc: '픽업 반경 +30%, 경험치 +15%',
+    descEn: 'Pickup radius +30%, XP +15%',
+    lore: '토지 측량과 곡물 환산, 세역과 운송의 셈법을 아홉 장에 묶은 산학의 경전. 펼쳐 읽은 자에게는 시세와 됫박의 속임수가 어디서 새는지 환히 드러난다.',
+    loreEn: 'The mathematical classic binding land survey, grain conversion, tax and transport into nine chapters. To one who has read it, wherever a false price or short measure leaks is laid bare.',
+    apply: (s) => {
+      s.pickupMul *= 1.3;
+      s.xpMul *= 1.15;
+    },
+  },
+  {
+    id: 'sima_fa',
+    name: '사마법',
+    nameEn: 'Methods of the Sima',
+    hanja: '司馬法',
+    desc: '광역 +12%, 최대 체력 +10%',
+    descEn: 'Area +12%, Max HP +10%',
+    lore: '군법과 진형을 다룬 옛 병서로, 글이 메말라 명령처럼 짧다. 읽으면 군을 부리는 법도가 차곡차곡 쟁여져, 어지러운 판에서도 무엇을 먼저 끊을지 셈하게 된다.',
+    loreEn: 'An old treatise on military law and formation, its prose dry and terse as an order. Read it, and the discipline of commanding troops stacks up within — even in chaos one reckons what to cut down first.',
+    apply: (s) => {
+      s.areaMul *= 1.12;
+      s.maxHpMul *= 1.1;
+    },
+  },
+  {
+    id: 'bingfa_chaolu',
+    name: '병법 초록',
+    nameEn: 'Tactics Miscellany',
+    hanja: '兵法抄錄',
+    desc: '경험치 +20%, 광역 +10%',
+    descEn: 'XP +20%, Area +10%',
+    lore: '여러 손에서 베껴 모은 잡록이라 글씨체가 장마다 다르다. 그래도 행간을 더듬다 보면 남의 패전이 제 머릿속에서 한 수의 분별로 굳는다.',
+    loreEn: 'A miscellany copied by many hands, its script changing page to page. Yet feel along between the lines, and another’s defeat hardens in your mind into a single stroke of discernment.',
+    apply: (s) => {
+      s.xpMul *= 1.2;
+      s.areaMul *= 1.1;
+    },
+  },
+  {
+    id: 'baiyu_pei',
+    name: '백옥패',
+    nameEn: 'White Jade Pendant',
+    hanja: '白玉佩',
+    desc: '체력 재생 +1/s, 이동속도 +8%',
+    descEn: 'HP regen +1/s, Move speed +8%',
+    lore: '서리빛 도는 흰 옥편을 끈으로 꿰어 허리 양옆에 드리운 묶음. 걸을 때마다 맑게 부딪쳐 그 소리가 사람보다 먼저 당도하니, 차림이 거칠어도 발걸음이 격을 발설한다.',
+    loreEn: 'Frost-pale jade tablets strung and hung at either side of the waist. They chime clear with each step so the sound arrives before the man — coarse dress and all, the gait betrays his rank.',
+    apply: (s) => {
+      s.hpRegen += 1.0;
+      s.speedMul *= 1.08;
+    },
+  },
+  {
+    id: 'shuanghuan_pei',
+    name: '쌍환패',
+    nameEn: 'Twin-Ring Pendant',
+    hanja: '雙環佩',
+    desc: '투사체 +1, 사거리·투사체 속도 +10%',
+    descEn: 'Projectiles +1, Range & projectile speed +10%',
+    lore: '두 고리를 위아래로 이어 늘어뜨린 옥. 한 고리가 울면 다른 고리가 받아 부딪는 소리가 겹으로 길게 끌리니, 마주한 자가 함부로 값을 깎지 못한다.',
+    loreEn: 'A jade of two rings hung one below the other. When one rings the other answers, the chime doubling and drawing long — so none who faces it dares haggle down its worth.',
+    apply: (s) => {
+      s.projectileBonus += 1;
+      s.rangeMul *= 1.1;
+    },
+  },
 ];
 
 export const MASTERWORK_BY_ID: Record<string, MasterworkDef> = {};
