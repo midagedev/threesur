@@ -227,7 +227,8 @@ export class Hud {
     bottom.className = 'hud-bottom';
     bottom.style.cssText = [
       'position:fixed',
-      'bottom:calc(env(safe-area-inset-bottom,0px) + 22px)',
+      // 터치 기기: 조이스틱 엄지 영역(하단)과 겹치지 않게 체력/게이지 바를 위로 올린다(오너 피드백).
+      `bottom:calc(env(safe-area-inset-bottom,0px) + ${this.touch ? '15vh' : '22px'})`,
       'left:0',
       'right:0',
       'display:flex',

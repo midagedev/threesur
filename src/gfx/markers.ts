@@ -821,7 +821,7 @@ export class MarkerLayer {
 
   // 방향 셰브론(#50): 목표 지점이 화면 밖이면 가장자리에 방향+거리(m)를 표시, 화면 안이면 숨김.
   // camera로 월드→NDC 투영. 거리는 player 위치 기준(run이 매 프레임 넘김). run 미배선 시 호출 안 되면 no-op.
-  guide(targetX: number, targetZ: number, playerX: number, playerZ: number, camera: PerspectiveCamera): void {
+  guide(targetX: number, targetZ: number, playerX: number, playerZ: number, camera: PerspectiveCamera, color = 'rgba(244,222,150,0.9)'): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.gv.set(targetX, 2.2, targetZ);
@@ -862,6 +862,8 @@ export class MarkerLayer {
     this.guideEl.style.top = `${ey}px`;
     this.guideEl.style.transform = 'translate(-50%,-50%)';
     this.guideArrow.style.transform = `rotate(${angleDeg}deg)`;
+    this.guideArrow.style.borderLeftColor = color; // 타겟 성격별 색(마차 금·보스 적·성목표 청)
+    this.guideDist.style.color = color;
     this.guideDist.textContent = `${dist}m`;
   }
 

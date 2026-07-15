@@ -207,12 +207,24 @@ loadAtlas()
       if (e.code === 'Escape' && scene === 'pause') resumeRun();
     });
 
-    window.addEventListener('resize', () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+    // iOS/iPad 견고화: 초기 사이징 레이스(잘못된 innerWidth로 캔버스 생성 후 resize 미발화 →
+    // 우측 일부 블랙) 방지. visualViewport·orientation·지연 재적용까지 모두 재사이즈.
+    const applySize = (): void => {
+      const w = Math.round(window.visualViewport?.width ?? window.innerWidth);
+      const h = Math.round(window.visualViewport?.height ?? window.innerHeight);
       rig.onResize(w, h);
       pipeline.setSize(w, h);
+    };
+    window.addEventListener('resize', applySize);
+    window.visualViewport?.addEventListener('resize', applySize);
+    window.addEventListener('orientationchange', () => {
+      // iOS는 orientationchange 직후 잠시 stale 치수를 보고 → 지연 재적용.
+      applySize();
+      setTimeout(applySize, 250);
     });
+    // 부팅 직후 레이아웃 확정 후 한 번 더(초기 mis-size 자가 치유).
+    requestAnimationFrame(applySize);
+    setTimeout(applySize, 300);
 
     // 부팅: 어트랙트 배경 + 타이틀. (오디오는 첫 제스처에서 활성 → 타이틀 BGM 예약)
     run.enterAttract();

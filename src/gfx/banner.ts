@@ -51,15 +51,17 @@ const FRAG = /* glsl */ `
     vec2 d = abs(vUv - 0.5) * 2.0;
     float shape = (1.0 - smoothstep(0.86, 1.0, d.x)) * (1.0 - smoothstep(0.72, 1.0, d.y));
 
-    // 짙은 천 바탕 + 주름 음영 + 상하 그라데이션 → 파스텔 워시가 아닌 묵직한 군기.
+    // 장수색은 블룸용 HDR(>1)일 수 있어 그대로 쓰면 천이 하얘짐 → LDR로 클램프 후 사용(오너 피드백).
+    vec3 tint = clamp(uColor, 0.0, 1.0);
+    // 어두운 군기 바탕 + 세력색 틴트 → 옅은 색 장수(원군 등)에서도 화면을 하얗게 덮지 않음.
     float shade = 0.5 + vFold * 0.26 + 0.14 * (1.0 - vUv.y);
-    vec3 cloth = uColor * shade;
+    vec3 cloth = mix(vec3(0.05, 0.06, 0.09), tint * 0.7, 0.5) * shade;
 
-    // 문양(한자) — 세력색을 머금은 밝은 엠블럼(캔버스 그림자로 대비 확보).
+    // 문양(한자) — 세력색 위주 엠블럼(흰색 지배 제거 → 화면 하얗게 덮는 문제 해소).
     vec4 g = texture2D(uTex, vUv);
-    vec3 emblem = mix(vec3(1.0), uColor * 2.2, 0.18);
+    vec3 emblem = tint * 0.9 + vec3(0.12);
     vec3 col = mix(cloth, emblem, g.a);
-    col += leadGlow * uColor * 1.0;
+    col += leadGlow * tint * 0.7;
 
     // 위·아래 얇은 금색 테두리 선.
     float bar = smoothstep(0.9, 0.97, d.y) * (1.0 - smoothstep(0.97, 1.02, d.y));
@@ -122,7 +124,7 @@ export class WaveBanner {
     this.mat.uniforms.uReveal.value = Math.min(1, t / 0.12);
     const fadeIn = Math.min(1, t / 0.1);
     const fadeOut = Math.min(1, this.life / 0.6);
-    this.mat.uniforms.uAlpha.value = Math.min(fadeIn, fadeOut) * 0.96;
+    this.mat.uniforms.uAlpha.value = Math.min(fadeIn, fadeOut) * 0.8; // 반투명 상향 — 배경 비침(화면 가림 완화)
 
     // 카메라 정면 상단(HUD 아래 여백)에 고정(빌보드).
     this.mesh.position.copy(camera.position);

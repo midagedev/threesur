@@ -14,6 +14,7 @@ import { ParticleSystem } from '../gfx/particles';
 import { DamageText } from '../gfx/damageText';
 import { Labels } from '../gfx/labels';
 import { MarkerLayer } from '../gfx/markers';
+import { CastleZone } from '../gfx/castleZone';
 import { LightField } from '../gfx/lightField';
 import { WaveBanner } from '../gfx/banner';
 import { DecalPool } from '../gfx/decals';
@@ -151,6 +152,7 @@ export class Run {
   private readonly damageText: DamageText;
   private readonly labels: Labels;
   private readonly markers: MarkerLayer;
+  private readonly castleZone: CastleZone;
   private readonly gateBreachFx: GateBreachFx;
   private readonly arrowRain: ArrowRain;
   private readonly starAura: StarAura;
@@ -275,6 +277,7 @@ export class Run {
     this.damageText = new DamageText(this.scene);
     this.labels = new Labels(this.scene);
     this.markers = new MarkerLayer(this.scene);
+    this.castleZone = new CastleZone(this.scene);
     this.gateBreachFx = new GateBreachFx(this.scene);
     this.gems = new GemPool(this.scene);
     this.projectiles = new ProjectilePool(this.scene, lu);
@@ -466,8 +469,8 @@ export class Run {
       this.hud.quote(
         this.hero.name,
         getLang() === 'en'
-          ? 'Hold 75s! Keep foes out of the inner keep — if 12 break in, Luoyang falls.'
-          : '75초를 버텨라! 적이 본성에 들면 함락 게이지가 오르고, 12에 이르면 낙양이 함락된다.',
+          ? 'Reclaimers flood in! Hold your ground in the castle for 75 seconds.'
+          : '탈환군이 몰려온다! 성 안에서 75초만 버텨내라.',
         4600,
       );
       audio.sfx('warn');
@@ -633,6 +636,7 @@ export class Run {
     this.treasure.reset();
     this.labels.reset();
     this.markers.reset();
+    this.castleZone.reset();
     this.arrowRain.reset();
     this.lightField.reset();
     this.banner.reset();
@@ -872,6 +876,9 @@ export class Run {
     this.spawner.setBossActive(this.boss.active);
     this.spawner.update(edt, this.gameTime, this.player.x, this.player.z);
     this.siege.update(edt, this.gameTime, this.player.x, this.player.z);
+    // 낙양 거점화·수성 중 성 안 방어 구역 바닥 표시(#51 가독성).
+    this.castleZone.setActive(this.siege.keepAuraActive);
+    this.castleZone.update(gdt);
     this.landmarks.update(edt);
     // 봉화 점화(근접 자동, #50 21.3): 점화 순간 주변 적 스태거 + 넉백 펄스.
     const ign = this.landmarks.tryIgniteBeacon(this.player.x, this.player.z);
@@ -1283,11 +1290,31 @@ export class Run {
     for (const g of CASTLE.outerGates) {
       this.markers.gateBar(g.x, g.z, this.map.gateHp01(g.key));
     }
-    // 현재 목표 방향 셰브론(#50 21.1): 목표 지점이 화면 밖이면 가장자리 지시.
-    const guide = this.siegeGuideTarget();
-    if (guide) this.markers.guide(guide.x, guide.z, px, pz, this.rig.camera);
+    // 화면 밖 목표 방향 셰브론(#51): 우선순위 — 보급 마차(도주·놓치기 쉬움) > 보스 > 성 목표.
+    // 색으로 성격 구분(마차 금·보스 적·성 청). 화면 안이면 guide가 자동 숨김.
+    const guide = this.guideTarget();
+    if (guide) this.markers.guide(guide.x, guide.z, px, pz, this.rig.camera, guide.color);
     else this.markers.guideOff();
     this.markers.end();
+  }
+
+  // 셰브론이 가리킬 최우선 화면-밖 대상 + 성격별 색.
+  private guideTarget(): { x: number; z: number; color: string } | null {
+    // 1) 보급 마차(도주 중인 특수 적 = flee 플래그). 시간 제한 이벤트라 최우선.
+    const en = this.enemies;
+    for (let i = 0; i < en.flee.length; i++) {
+      if (en.alive[i] === 1 && en.flee[i] === 1) {
+        return { x: en.x[i], z: en.z[i], color: 'rgba(255,225,77,0.95)' }; // 금색(보급)
+      }
+    }
+    // 2) 보스(활성 시). 화면 안이면 guide가 숨기므로 항상 넘겨도 무해.
+    if (this.boss.active && this.boss.idx >= 0 && en.alive[this.boss.idx] === 1) {
+      return { x: en.x[this.boss.idx], z: en.z[this.boss.idx], color: 'rgba(232,92,74,0.95)' }; // 적색(보스)
+    }
+    // 3) 성 공방전 목표.
+    const s = this.siegeGuideTarget();
+    if (s) return { x: s.x, z: s.z, color: 'rgba(120,220,200,0.9)' }; // 청록(성 목표)
+    return null;
   }
 
   // 현재 공성 국면의 목표 지점(셰브론이 가리킬 곳). 성 근처가 아니면 null(선택형).
