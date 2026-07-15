@@ -49,6 +49,7 @@ class AudioSystem {
   private readonly buffers: Record<string, AudioBuffer | undefined> = {};
   private readonly loading: Record<string, boolean> = {};
   private current: BgmVoice | null = null;
+  private fading: { src: AudioBufferSourceNode; gain: GainNode } | null = null; // 페이드아웃 중인 직전 트랙(최대 1개)
   private wantBgm: string | null = null;
 
   muted = false;
@@ -180,12 +181,16 @@ class AudioSystem {
     const buf = this.buffers[name];
     if (!buf) {
       this.ensureBuffer(name);
-      // 로드 후 1회성이므로 준비되면 즉시 재생(재요청 없이)
-      const check = () => {
+      // 로드 후 1회성이므로 준비되면 즉시 재생. done 가드로 두 setTimeout이 이중 재생하지 않게.
+      let done = false;
+      const check = (): void => {
+        if (done) return;
         const b = this.buffers[name];
-        if (b) this.startBgm(name, b, false);
+        if (b) {
+          done = true;
+          this.startBgm(name, b, false);
+        }
       };
-      // ensureBuffer 완료 콜백은 wantBgm 기반이라, 여기선 짧게 폴링 대신 재시도 예약
       setTimeout(check, 400);
       setTimeout(check, 1200);
       return;
@@ -219,8 +224,26 @@ class AudioSystem {
     }
   }
 
+  // 페이드아웃 중이던 직전 트랙을 즉시 정지. 크로스페이드가 겹겹이 쌓여 BGM이 2~3개
+  // 동시에 들리는 것을 막는다(동시 최대 = 나가는 것 1 + 들어오는 것 1).
+  private hardStopFading(): void {
+    if (!this.fading || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    const { src, gain } = this.fading;
+    try {
+      gain.gain.cancelScheduledValues(t);
+      gain.gain.setValueAtTime(0, t);
+      src.stop(t + 0.02);
+    } catch {
+      /* ignore */
+    }
+    this.fading = null;
+  }
+
   private fadeOutCurrent(): void {
     if (!this.ctx || !this.current) return;
+    // 새 크로스페이드 시작 전, 아직 페이드 중인 직전 트랙을 정리(중첩 방지).
+    this.hardStopFading();
     const t = this.ctx.currentTime;
     const { src, gain } = this.current;
     gain.gain.cancelScheduledValues(t);
@@ -231,6 +254,17 @@ class AudioSystem {
     } catch {
       /* ignore */
     }
+    const voice = { src, gain };
+    this.fading = voice;
+    src.onended = () => {
+      if (this.fading === voice) this.fading = null;
+      try {
+        src.disconnect();
+        gain.disconnect();
+      } catch {
+        /* ignore */
+      }
+    };
     this.current = null;
   }
 
