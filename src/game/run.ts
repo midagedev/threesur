@@ -239,6 +239,7 @@ export class Run {
   private lastAttackX = 0;
   private lastAttackZ = 1;
   private lastAttackCount = 0;
+  private prevAttackCount = 0; // 프레임당 공격 델타 산출용(성문 HP 타격 연동)
 
   constructor(atlas: Atlas, rig: CameraRig, input: Input, hooks: RunHooks, touch = false) {
     this.atlas = atlas;
@@ -644,6 +645,7 @@ export class Run {
     this.lastAttackX = 0;
     this.lastAttackZ = 1;
     this.lastAttackCount = 0;
+    this.prevAttackCount = 0;
     this.companion.reset(this.hero.id);
     this.companion2.reset(this.hero.id, { def: pickSecondCompanion(this.companion.definition.id, () => rng.next()), side: -1, joinTime: SECOND_JOIN_TIME, specialPhase: 6 });
     this.boss.active = false;
@@ -989,15 +991,19 @@ export class Run {
       }
     }
     this.objects.hitAt(this.player.x, this.player.z, 4.0);
-    // 성문 HP 직접 타격(#50 21.2): 봉쇄 성문 근처(6m)면 초당 딜을 게이트에 흘려보내 깎는다.
-    // 파성된 개구부·점령 후는 nearestSealedGateKey가 null → 무영향(선택형).
-    const sealedGate = this.map.nearestSealedGateKey(this.player.x, this.player.z, 6);
-    if (sealedGate) {
-      const dealt = 120 * this.player.stats.damageMul * gdt; // GATE_STREAM_DPS 근사
-      const breached = this.map.damageGate(sealedGate, dealt);
-      const g = this.map.gates.find((x) => x.key === sealedGate);
-      if (g && Math.random() < 22 * gdt) this.effects.spawnRing(g.x, g.z, 1.4, 1.5, 0.55, 0.2, 0.2); // 성문 피격 스파크
-      if (breached) this.onGateBreached(breached);
+    // 성문 HP 직접 타격(#50 21.2): 이번 프레임에 무기가 실제로 공격을 발동했고(lastAttackCount 증가)
+    // 봉쇄 성문 근처(6m)일 때만 타격당 청크로 감소. 그냥 서 있으면(공격 없음) 안 닳음 — 오너 피드백.
+    const atkThisFrame = this.lastAttackCount - this.prevAttackCount;
+    this.prevAttackCount = this.lastAttackCount;
+    if (atkThisFrame > 0) {
+      const sealedGate = this.map.nearestSealedGateKey(this.player.x, this.player.z, 6);
+      if (sealedGate) {
+        const dealt = 34 * this.player.stats.damageMul * atkThisFrame; // 타격당 청크(≈4타/s → ~120/s)
+        const breached = this.map.damageGate(sealedGate, dealt);
+        const g = this.map.gates.find((x) => x.key === sealedGate);
+        if (g) this.effects.spawnRing(g.x, g.z, 1.5, 1.6, 0.6, 0.22, 0.22); // 타격마다 성문 피격 스파크
+        if (breached) this.onGateBreached(breached);
+      }
     }
 
     // 무쌍 난무 (실제 dt로 진행, 종료 시 마무리 충격파)

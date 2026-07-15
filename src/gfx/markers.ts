@@ -767,10 +767,11 @@ export class MarkerLayer {
     this.guideArrow.style.cssText = [
       'width:0',
       'height:0',
-      'border-top:9px solid transparent',
-      'border-bottom:9px solid transparent',
-      'border-left:15px solid rgba(240,220,150,0.82)', // 우향 삼각형(0deg), guide()가 회전
-      'filter:drop-shadow(0 0 4px rgba(0,0,0,0.6))',
+      // 밑변 좁고(7px×2) 길이 긴(26px) 뾰족한 화살촉 — 방향이 한눈에 읽히게(오너 피드백).
+      'border-top:7px solid transparent',
+      'border-bottom:7px solid transparent',
+      'border-left:26px solid rgba(244,222,150,0.9)', // 우향 화살촉(0deg), guide()가 회전
+      'filter:drop-shadow(0 0 4px rgba(0,0,0,0.7))',
     ].join(';');
     this.guideDist = document.createElement('div');
     this.guideDist.style.cssText =
