@@ -4,6 +4,7 @@ import {
   BEHAVIOR_CHARGE,
   BEHAVIOR_SHIELD,
   BEHAVIOR_VOLLEY,
+  ENEMY_CAP,
   EnemyPool,
   SHEET_SOLDIERS,
   SHEET_VARIANTS,
@@ -70,6 +71,7 @@ export class Spawner {
   private eliteTimer = ELITE_INTERVAL;
   private surroundTimer = 0;
   private bossActive = false;
+  private siegeActive = false; // 낙양 수성 중: 오픈필드 일반 스폰율 0.55x(DESIGN 20)
   private factionIdx = 0; // 현재 세력 단계(전환 감지용)
   onWave: ((faction: Faction) => void) | null = null; // 세력 전환 시 배너 트리거(run이 주입)
   private readonly atlas: Atlas;
@@ -95,11 +97,16 @@ export class Spawner {
     this.eliteTimer = ELITE_INTERVAL;
     this.surroundTimer = 0;
     this.bossActive = false;
+    this.siegeActive = false;
     this.factionIdx = 0; // 시작 세력(황건)은 배너 없이 진입
   }
 
   setBossActive(v: boolean): void {
     this.bossActive = v;
+  }
+
+  setSiegeActive(v: boolean): void {
+    this.siegeActive = v;
   }
 
   private hpScale(minute: number): number {
@@ -119,6 +126,7 @@ export class Spawner {
     // #25 밀도 밸런스: 초반 레이트 완화(2.6→1.7/분) + 상한 25→18로 6분 스파이크 평탄화.
     let rate = Math.min(18, 2 + minute * 1.7); // 초당 스폰 수
     if (this.bossActive) rate *= 0.4; // 보스전: 잡몹 스폰 감소(#40, 0.6→0.4) — 오토에임 분산·데미지 스펀지 완화
+    else if (this.siegeActive) rate *= 0.55; // 낙양 수성: 오픈필드 스폰율 하향, 성문 웨이브에 무게(DESIGN 20)
 
     if (this.pool.aliveCount < ENEMY_SOFT_CAP) {
       this.acc += rate * dt;
@@ -167,7 +175,7 @@ export class Spawner {
     this.placeEnemy(type, this._p.x, this._p.z, minute);
   }
 
-  private placeEnemy(type: EnemyType, x: number, z: number, minute: number): number {
+  private placeEnemy(type: EnemyType, x: number, z: number, minute: number, factionIdx?: number): number {
     this.map.projectWalkable(x, z, type.radius + 0.08, this._spawnP);
     x = this._spawnP.x;
     z = this._spawnP.z;
@@ -175,7 +183,8 @@ export class Spawner {
     let sheetId = SHEET_SOLDIERS;
     let blockPx = this.atlas.soldierBlockPx(type.charIndex);
     let blockPy = 0;
-    const faction = FACTIONS[factionForMinute(minute)];
+    // factionIdx 지정 시 시간대 무시하고 해당 세력 틴트로 고정(낙양 수비대·탈환군=동탁군).
+    const faction = FACTIONS[factionIdx ?? factionForMinute(minute)];
     // 색변형 스프라이트: 세력 구간 내 무작위 → 대군에 미세한 몸체 다양성(1분 이후).
     if (minute >= 1) {
       const variants = this.atlas.variantBlocks(type.id);
@@ -257,14 +266,45 @@ export class Spawner {
     }
   }
 
-  spawnGateRush(x: number, z: number, horizontal: boolean, minute: number): void {
+  spawnGateRush(x: number, z: number, horizontal: boolean, minute: number, factionIdx?: number): void {
     for (let k = 0; k < 10; k++) {
       const row = (k / 2) | 0;
       const lane = (k % 2) * 2 - 1;
       const sx = horizontal ? x + lane * 1.5 : x - 4 - row * 1.4;
       const sz = horizontal ? z - 4 - row * 1.4 : z + lane * 1.5;
-      this.placeEnemy(k >= 8 ? ENEMY_TYPES.general_spear : ENEMY_TYPES.runner, sx, sz, minute);
+      this.placeEnemy(k >= 8 ? ENEMY_TYPES.general_spear : ENEMY_TYPES.runner, sx, sz, minute, factionIdx);
     }
+  }
+
+  // === 낙양 공방전(DESIGN 20) 스폰 — 위치는 SiegeSystem이 계산, 종류/틴트/행동만 스포너가 부여 ===
+  // 수비대/탈환군 단일 개체(동탁군 색군 고정). bow=파수꾼(궁수·BEHAVIOR_VOLLEY).
+  spawnSiegeAttacker(x: number, z: number, minute: number, bow = false): number {
+    const type = bow ? ENEMY_TYPES.general_bow : this.pickType(minute);
+    return this.placeEnemy(type, x, z, minute, 1); // 세력 1 = 동탁군
+  }
+
+  // 성문 밖 한 지점을 중심으로 10기 돌격군 클러스터(수성 웨이브). 2기는 궁수.
+  spawnSiegeRush(cx: number, cz: number, minute: number): void {
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * Math.PI * 2;
+      const r = 1.4 + (k % 3) * 0.9;
+      this.spawnSiegeAttacker(cx + Math.cos(a) * r, cz + Math.sin(a) * r, minute, k >= 8);
+    }
+  }
+
+  // 성 최초 접근 시 안뜰 모서리 파수꾼(궁수 4기, 동탁군).
+  spawnGateWatch(corners: { x: number; z: number }[], minute: number): void {
+    for (const c of corners) this.spawnSiegeAttacker(c.x, c.z, minute, true);
+  }
+
+  // 외성 안뜰(내성 밖) 안에 생존 중인 적 수 — 수비대 로컬 캡 판정.
+  garrisonCount(): number {
+    let n = 0;
+    for (let i = 0; i < ENEMY_CAP; i++) {
+      if (this.pool.alive[i] === 1 && this.pool.controlled[i] === 0 &&
+          this.map.insideCastleBounds(this.pool.x[i], this.pool.z[i], 0)) n++;
+    }
+    return n;
   }
 
   private spawnSurround(minute: number, px: number, pz: number): void {

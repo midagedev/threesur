@@ -112,6 +112,29 @@ export class BattlefieldObjects {
     this.alive[slot] = 1;
   }
 
+  // 낙양 거점화(DESIGN 20): 지정 위치에 만두/동라 배치. 슬롯 없으면 false.
+  // 랜덤 spawnObject와 달리 SiegeSystem이 내성 안뜰 좌표를 계산해 호출한다.
+  private placeAt(kind: number, x: number, z: number): boolean {
+    let slot = -1;
+    for (let i = 0; i < OBJ_CAP; i++) if (this.alive[i] === 0) { slot = i; break; }
+    if (slot < 0) return false;
+    this.x[slot] = x;
+    this.z[slot] = z;
+    this.kind[slot] = kind;
+    this.igniteT[slot] = 0;
+    this.drumCd[slot] = 0;
+    this.alive[slot] = 1;
+    return true;
+  }
+
+  spawnDumplingAt(x: number, z: number): boolean {
+    return this.placeAt(KIND_DUMPLING, x, z);
+  }
+
+  spawnGongAt(x: number, z: number): boolean {
+    return this.placeAt(KIND_GONG, x, z);
+  }
+
   update(dt: number, gameTime: number): void {
     // 스폰(낮은 빈도)
     this.spawnTimer -= dt;

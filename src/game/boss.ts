@@ -43,6 +43,9 @@ export const BOSS_DEFS: Record<string, BossDef> = {
   zhouyu: { name: '주유', hanja: '周瑜', charIndex: 18, sheet: SHEET_SGRADE, pattern: 'firezone', hp: 3600, speed: 2.4, contact: 16, radius: 1.5, tr: 2.0, tg: 1.0, tb: 0.45 },
   // 9분 고정 최종
   lvbu: { name: '여포', hanja: '呂布', charIndex: 10, sheet: SHEET_SGRADE, pattern: 'lvbu', hp: 7500, speed: 3.6, contact: 20, radius: 1.5, tr: 1.5, tg: 0.9, tb: 1.1 },
+  // 낙양 공방전 성주(DESIGN 20) — 동탁의 선봉장 화웅. 미니보스급 HP·돌격 패턴.
+  // 스프라이트는 동탁군 계열(sgrade charIndex 4)을 진홍 틴트로 재사용(전용 스프라이트는 sprite 레인 후속).
+  huaxiong: { name: '화웅', hanja: '華雄', charIndex: 4, sheet: SHEET_SGRADE, pattern: 'dash', hp: 5200, speed: 2.7, contact: 16, radius: 1.45, tr: 1.7, tg: 0.5, tb: 0.42 },
   // 무한 미니보스 (12분+ 순환, 스케일링)
   dianwei: { name: '전위', hanja: '典韋', charIndex: 6, sheet: SHEET_APRIORITY, pattern: 'dash', hp: 5000, speed: 2.8, contact: 17, radius: 1.4, tr: 1.4, tg: 1.1, tb: 0.9 },
   gaoshun: { name: '고순', hanja: '高順', charIndex: 8, sheet: SHEET_APRIORITY, pattern: 'fan', hp: 5000, speed: 2.5, contact: 15, radius: 1.35, tr: 1.2, tg: 1.15, tb: 1.0 },

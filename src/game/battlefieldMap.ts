@@ -42,7 +42,32 @@ export const castleRenderData = {
   banners: [] as CastleBanner[],
   bannerVersion: 0,
   title: { text: '낙양 외성 洛陽外城', x: CASTLE_CX, y: 6.4, z: CASTLE_CZ + CASTLE_OHZ - 8, alpha: 0 },
+  // 성 소유 상태 → markers 깃발 색 전환 웨이브 채널(낙양 공방전, DESIGN 20절).
+  // flipVersion 증가가 전환 트리거, (flipX,flipZ) 원점에서 먼 깃발일수록 늦게 물든다.
+  allied: false,
+  flipVersion: 0,
+  flipX: 0,
+  flipZ: 0,
 };
+
+// 낙양 공방전(DESIGN 20)이 소비하는 성곽 지오메트리 계약. SiegeSystem이 스폰/판정 좌표 계산에 사용.
+// battlefieldMap이 실제 벽/성문을 세우는 상수와 단일 원천을 공유한다(중복 하드코딩 방지).
+export const CASTLE = {
+  cx: CASTLE_CX,
+  cz: CASTLE_CZ,
+  ohx: CASTLE_OHX,
+  ohz: CASTLE_OHZ,
+  ihx: CASTLE_IHX,
+  ihz: CASTLE_IHZ,
+  // 외성 3성문(봉쇄→파성 대상). horizontal은 벽 방향과 일치.
+  outerGates: [
+    { key: 'castle-s', x: CASTLE_CX, z: CASTLE_CZ + CASTLE_OHZ, horizontal: true },
+    { key: 'castle-e', x: CASTLE_CX + CASTLE_OHX, z: CASTLE_CZ, horizontal: false },
+    { key: 'castle-w', x: CASTLE_CX - CASTLE_OHX, z: CASTLE_CZ, horizontal: false },
+  ] as const,
+  // 내성문(성주 출진 시 봉쇄 해제).
+  keepGate: { key: 'castle-keep-s', x: CASTLE_CX, z: CASTLE_CZ + CASTLE_IHZ, horizontal: true },
+} as const;
 
 export interface MapWall {
   x: number;
@@ -166,6 +191,15 @@ export class BattlefieldMap {
 
   private readonly colliders: Collider[] = [];
   private readonly breached = new Set<string>();
+  // 낙양 공방전(DESIGN 20): 외성 3성문 봉쇄 상태 + 성문별 파성 킬 카운트.
+  // 내성문은 성주 출진 전까지 봉쇄(keepSealed). castleBreachable=false면 점령 후 파성 카운트 중단.
+  private keepSealed = true;
+  private castleBreachable = true;
+  private readonly castleGateKills: Record<string, number> = {
+    'castle-s': 0,
+    'castle-e': 0,
+    'castle-w': 0,
+  };
   // 오픈필드가 기본. 정적 성곽 구역은 상시 존재, 호로관 성벽/게이트는 세트피스 동안만 존재.
   private hulaoActive = false;
   private hulaoTimer = 0;
@@ -233,6 +267,16 @@ export class BattlefieldMap {
     this.flowActive = false;
     this.castleTitleAlpha = 0;
     castleRenderData.title.alpha = 0;
+    // 낙양 공방전: 성 재봉쇄(ENEMY_HELD) + 소유권 적으로 되돌림.
+    this.keepSealed = true;
+    this.castleBreachable = true;
+    this.castleGateKills['castle-s'] = 0;
+    this.castleGateKills['castle-e'] = 0;
+    this.castleGateKills['castle-w'] = 0;
+    castleRenderData.allied = false;
+    castleRenderData.flipX = CASTLE_CX;
+    castleRenderData.flipZ = CASTLE_CZ;
+    castleRenderData.flipVersion++; // 이전 런의 아군 깃발을 적색으로 되돌리는 전환 트리거
     this.rebuild(); // 오픈필드 + 정적 성곽으로 초기화
   }
 
@@ -327,14 +371,17 @@ export class BattlefieldMap {
     this.addWall(cx - g - oSeg * 0.5, cz + ohz, oSeg, T, true, true);
     this.addWall(cx + g + oSeg * 0.5, cz + ohz, oSeg, T, true, true);
     this.gates.push({ key: 'castle-s', x: cx, z: cz + ohz, horizontal: true, visible: true });
+    this.addCastleGateCollider('castle-s', cx, cz + ohz, CASTLE_GATE, true);
     // 외성 동벽(성문)
     this.addWall(cx + ohx, cz - g - oSegZ * 0.5, T, oSegZ, false, true);
     this.addWall(cx + ohx, cz + g + oSegZ * 0.5, T, oSegZ, false, true);
     this.gates.push({ key: 'castle-e', x: cx + ohx, z: cz, horizontal: false, visible: true });
+    this.addCastleGateCollider('castle-e', cx + ohx, cz, CASTLE_GATE, false);
     // 외성 서벽(성문)
     this.addWall(cx - ohx, cz - g - oSegZ * 0.5, T, oSegZ, false, true);
     this.addWall(cx - ohx, cz + g + oSegZ * 0.5, T, oSegZ, false, true);
     this.gates.push({ key: 'castle-w', x: cx - ohx, z: cz, horizontal: false, visible: true });
+    this.addCastleGateCollider('castle-w', cx - ohx, cz, CASTLE_GATE, false);
 
     // 내성(본성): 남쪽 성문 1개로 안뜰을 형성. 나머지 3면 폐쇄.
     const ihx = CASTLE_IHX;
@@ -345,6 +392,7 @@ export class BattlefieldMap {
     this.addWall(cx - kg - kSeg * 0.5, cz + ihz, kSeg, T, true, true); // 남(좌)
     this.addWall(cx + kg + kSeg * 0.5, cz + ihz, kSeg, T, true, true); // 남(우)
     this.gates.push({ key: 'castle-keep-s', x: cx, z: cz + ihz, horizontal: true, visible: true });
+    if (this.keepSealed) this.addCastleGateCollider('castle-keep-s', cx, cz + ihz, CASTLE_KEEP_GATE, true);
     this.addWall(cx + ihx, cz, T, ihz * 2, false, true); // 동
     this.addWall(cx - ihx, cz, T, ihz * 2, false, true); // 서
 
@@ -494,6 +542,19 @@ export class BattlefieldMap {
     if (visible) this.walls.push({ x, z, hx: width * 0.5, hz: depth * 0.5, horizontal, visible });
   }
 
+  // 낙양 성문 봉쇄 콜라이더(파성 전까지). 호로관 게이트 콜라이더와 동일 규격 —
+  // 파성되면 rebuild가 이 콜라이더를 생략하고, flow-field가 통행로를 반영한다.
+  private addCastleGateCollider(key: string, x: number, z: number, gateWidth: number, horizontal: boolean): void {
+    if (this.breached.has(key)) return;
+    this.colliders.push({
+      x,
+      z,
+      hx: horizontal ? gateWidth * 0.5 : WALL_THICKNESS * 0.5,
+      hz: horizontal ? WALL_THICKNESS * 0.5 : gateWidth * 0.5,
+      gateKey: key,
+    });
+  }
+
   circleBlocked(x: number, z: number, radius: number): boolean {
     for (const c of this.colliders) {
       const qx = Math.max(c.x - c.hx, Math.min(x, c.x + c.hx));
@@ -580,15 +641,31 @@ export class BattlefieldMap {
   }
 
   recordKillAt(x: number, z: number): GateBarrier | null {
-    if (!this.hulaoActive || this.breached.has('hulao')) return null;
-    const gate = this.gates.find((candidate) => candidate.key === 'hulao');
-    if (!gate) return null;
-    const dx = x - gate.x;
-    const dz = z - gate.z;
-    if (dx * dx + dz * dz > 10 * 10) return null;
-    this.gateKills++;
-    if (this.gateKills < 12) return null;
-    return this.breachNear(gate.x, gate.z, 0.5);
+    // 호로관 세트피스: 성문 10m 내 킬 12회로 파성(단일 카운터).
+    if (this.hulaoActive && !this.breached.has('hulao')) {
+      const gate = this.gates.find((candidate) => candidate.key === 'hulao');
+      if (gate) {
+        const dx = x - gate.x;
+        const dz = z - gate.z;
+        if (dx * dx + dz * dz <= 10 * 10) {
+          this.gateKills++;
+          if (this.gateKills >= 12) return this.breachNear(gate.x, gate.z, 0.5);
+        }
+      }
+    }
+    // 낙양 외성: 봉쇄된 성문 9m 내 킬을 성문별로 카운트, 12킬 도달 시 해당 성문 파성.
+    if (this.castleBreachable) {
+      for (const g of CASTLE.outerGates) {
+        if (this.breached.has(g.key)) continue;
+        const dx = x - g.x;
+        const dz = z - g.z;
+        if (dx * dx + dz * dz > 9 * 9) continue;
+        this.castleGateKills[g.key]++;
+        if (this.castleGateKills[g.key] >= 12) return this.breachNear(g.x, g.z, 0.5);
+        return null; // 이 성문에 카운트됨(아직 미파성) — 한 킬은 한 성문에만 기여.
+      }
+    }
+    return null;
   }
 
   primeGate(): void {
@@ -708,6 +785,45 @@ export class BattlefieldMap {
       z >= CASTLE_CZ - CASTLE_OHZ - margin &&
       z <= CASTLE_CZ + CASTLE_OHZ + margin
     );
+  }
+
+  // 내성(본성) 사각 안에 있는지 — 함락 게이지·거점화 오라 판정용(낙양 공방전).
+  insideKeepBounds(x: number, z: number, margin = 0): boolean {
+    return (
+      x >= CASTLE_CX - CASTLE_IHX - margin &&
+      x <= CASTLE_CX + CASTLE_IHX + margin &&
+      z >= CASTLE_CZ - CASTLE_IHZ - margin &&
+      z <= CASTLE_CZ + CASTLE_IHZ + margin
+    );
+  }
+
+  // 성주 출진: 내성문 봉쇄 해제(콜라이더 제거 + flow 재구성).
+  openKeepGate(): void {
+    if (!this.keepSealed) return;
+    this.keepSealed = false;
+    this.rebuild();
+    this.rebuildFlow();
+  }
+
+  // 점령 이후 외성문 파성 카운트 중단(수성 중 잔여 봉쇄문이 킬로 열리지 않게).
+  setCastleBreachable(v: boolean): void {
+    this.castleBreachable = v;
+  }
+
+  // 파성된 외성문 수(성주 출진 조건 판정용).
+  castleOuterBreachCount(): number {
+    let n = 0;
+    for (const g of CASTLE.outerGates) if (this.breached.has(g.key)) n++;
+    return n;
+  }
+
+  // 성문별 파성 킬 카운트(테스트/HUD 힌트용).
+  castleGateKillsFor(key: string): number {
+    return this.castleGateKills[key] ?? 0;
+  }
+
+  get keepGateSealed(): boolean {
+    return this.keepSealed;
   }
 }
 

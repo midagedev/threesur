@@ -8,6 +8,7 @@ import { BattlefieldWorld } from '../gfx/worldKit';
 import { GateBreachFx } from '../gfx/gateBreachFx';
 import { InstancedSpriteRenderer, ShadowRenderer } from '../gfx/sprites';
 import { EffectsSystem } from '../gfx/effects';
+import { ArrowRain } from '../gfx/arrowRain';
 import { ParticleSystem } from '../gfx/particles';
 import { DamageText } from '../gfx/damageText';
 import { Labels } from '../gfx/labels';
@@ -65,8 +66,10 @@ import { audio } from '../core/audio';
 import { Companion } from './companion';
 import { pickSecondCompanion, SECOND_JOIN_TIME } from '../data/companions';
 import { pickLine } from '../data/dialogue';
-import { BattlefieldMap } from './battlefieldMap';
+import { BattlefieldMap, castleRenderData, CASTLE } from './battlefieldMap';
 import type { GateBarrier, MapLandmark } from './battlefieldMap';
+import { SiegeSystem } from './siege';
+import { lordName, lordAppearLine, lordDeathLine, siegeQuestLine, siegeBanner } from '../data/siegeData';
 
 type State = 'attract' | 'play' | 'levelup' | 'paused' | 'dead' | 'victory';
 
@@ -145,6 +148,7 @@ export class Run {
   private readonly labels: Labels;
   private readonly markers: MarkerLayer;
   private readonly gateBreachFx: GateBreachFx;
+  private readonly arrowRain: ArrowRain;
 
   private readonly player: Player;
   private readonly companion: Companion;
@@ -166,6 +170,8 @@ export class Run {
   private readonly boss: Boss;
   private readonly events: BattlefieldEvents;
   private readonly objects: BattlefieldObjects;
+  private readonly siege: SiegeSystem;
+  private siegeEvents = { lordSpawn: 0, capture: 0, counter: 0, volley: 0, defended: 0, lost: 0 };
 
   private readonly hud: Hud;
   private readonly levelup = new LevelUp();
@@ -255,6 +261,7 @@ export class Run {
     );
 
     this.effects = new EffectsSystem(this.scene);
+    this.arrowRain = new ArrowRain(this.scene, this.effects);
     this.decals = new DecalPool(this.scene);
     this.particles = new ParticleSystem(this.scene);
     this.damageText = new DamageText(this.scene);
@@ -377,6 +384,86 @@ export class Run {
         this.lastAttackCount++;
       },
       scratch: this.scratch,
+    };
+
+    // 낙양 공방전(DESIGN 20). 참조는 생성자 주입, 이벤트는 콜백 필드(spawner.onWave 패턴).
+    this.siege = new SiegeSystem({
+      map: this.map,
+      spawner: this.spawner,
+      enemies: this.enemies,
+      rng,
+      bossActive: () => this.boss.active,
+      hulaoActive: () => this.map.hulaoOn,
+      requestLord: (x, z) => {
+        if (this.boss.active) return;
+        this.boss.spawn('huaxiong', Math.max(1, this.gameTime / 60), this.ctx, x, z + 16);
+        if (this.boss.idx >= 0) {
+          this.enemies.x[this.boss.idx] = x;
+          this.enemies.z[this.boss.idx] = z;
+          this.cinematics.onBossSpawn(x - this.player.x, z - this.player.z);
+        }
+      },
+      hitPlayer: (dmg) => { this.onPlayerHit(dmg); },
+      placeSupply: (kind, x, z) => {
+        if (kind === 'dumpling') this.objects.spawnDumplingAt(x, z);
+        else this.objects.spawnGongAt(x, z);
+      },
+    });
+    this.siege.onApproach = () => {
+      this.hud.quote(this.hero.name, siegeQuestLine(), 3600);
+      audio.sfx('warn');
+    };
+    this.siege.onLordSpawn = () => {
+      this.siegeEvents.lordSpawn++;
+      this.hud.quote(lordName(), lordAppearLine(0), 3200);
+    };
+    this.siege.onCapture = (x, z) => {
+      this.siegeEvents.capture++;
+      this.hud.banner(siegeBanner('capture'), '#ffd86b', 60, 1800, 1);
+      for (let k = 0; k < 10; k++) {
+        const a = rng.next() * Math.PI * 2;
+        this.gems.spawn(x + Math.cos(a) * 2, z + Math.sin(a) * 2, 6);
+      }
+      // 점령 보상: 명기 3택(미보유 풀). 전부 보유면 회복 폴백. (#36 보스 보상과 동일 패턴)
+      const picks = rollMasterworks(() => rng.next(), this.masterworkIds, 3);
+      if (picks.length > 0) {
+        this.player.heal(this.player.maxHp * 0.4);
+        this.curChoices = picks.map((m) => ({ kind: 'masterwork', id: m.id }) as Choice);
+        this.state = 'levelup';
+        const views = this.curChoices.map((c) => this.cardView(c));
+        this.levelup.open(views, Math.floor(this.gold), false, (i) => this.pickCard(i), () => {});
+      } else {
+        this.player.heal(this.player.maxHp * 0.5);
+      }
+    };
+    this.siege.onCounterattack = () => {
+      this.siegeEvents.counter++;
+      this.hud.banner(siegeBanner('counter'), '#e85c4a', 56, 1800, 1);
+      audio.sfx('warn');
+      this.rig.addTrauma(0.4);
+    };
+    this.siege.onVolley = (shots) => {
+      this.siegeEvents.volley++;
+      this.arrowRain.volley(shots); // gfx 화살비. 착탄 판정(피해)은 siege 소유 — payload 동기
+    };
+    this.siege.onDefended = () => {
+      this.siegeEvents.defended++;
+      this.hud.banner(siegeBanner('defended'), '#9affc0', 60, 1800, 1);
+      for (let k = 0; k < 24; k++) {
+        const a = rng.next() * Math.PI * 2;
+        const r = 2 + rng.next() * 5;
+        this.gems.spawn(CASTLE.cx + Math.cos(a) * r, CASTLE.cz + Math.sin(a) * r, 8);
+      }
+      for (let k = 0; k < 3; k++) this.objects.spawnDumplingAt(CASTLE.cx + (k - 1) * 3, CASTLE.cz + 3);
+      this.musou.gauge = Math.min(100, this.musou.gauge + 50);
+      this.rig.addTrauma(0.5);
+      audio.sfx('levelup');
+    };
+    this.siege.onLost = () => {
+      this.siegeEvents.lost++;
+      this.hud.banner(siegeBanner('fallen'), '#c8322a', 56, 1800, 1);
+      this.rig.addTrauma(0.6);
+      audio.sfx('warn');
     };
 
     // 낙뢰 화면 미세 플래시 훅
@@ -508,6 +595,7 @@ export class Run {
     this.treasure.reset();
     this.labels.reset();
     this.markers.reset();
+    this.arrowRain.reset();
     this.lightField.reset();
     this.banner.reset();
     this.decals.reset();
@@ -522,6 +610,8 @@ export class Run {
     this.events.reset();
     this.objects.reset();
     this.map.reset();
+    this.siege.reset();
+    this.siegeEvents = { lordSpawn: 0, capture: 0, counter: 0, volley: 0, defended: 0, lost: 0 };
     this.gateBreachFx.reset();
     this.cinematics.reset();
     this.gateRushTimer = 0;
@@ -738,6 +828,7 @@ export class Run {
 
     this.spawner.setBossActive(this.boss.active);
     this.spawner.update(edt, this.gameTime, this.player.x, this.player.z);
+    this.siege.update(edt, this.gameTime, this.player.x, this.player.z);
 
     // 분리용 해시 (이동 전)
     this.hash.clear();
@@ -828,6 +919,19 @@ export class Run {
         this.lightField.spawn(lm.x, 0.6, lm.z, 1.3, 0.9, 0.5, 6, 0.2);
       }
     }
+    // 낙양 거점화 회복 오라 — 내성 중심 반경 6m, 군영과 동일률(0.025/s). (DESIGN 20)
+    if (this.siege.keepAuraActive) {
+      const kx = this.siege.keepCenterX;
+      const kz = this.siege.keepCenterZ;
+      const ax = this.player.x - kx;
+      const az = this.player.z - kz;
+      const kr = this.siege.keepAuraRadius;
+      if (ax * ax + az * az <= kr * kr) {
+        this.player.heal(this.player.maxHp * 0.025 * gdt);
+        if (Math.random() < 6 * gdt) this.particles.steam(kx, kz + 0.4);
+        this.lightField.spawn(kx, 0.6, kz, 1.3, 0.9, 0.5, 6, 0.2);
+      }
+    }
     this.objects.hitAt(this.player.x, this.player.z, 4.0);
 
     // 무쌍 난무 (실제 dt로 진행, 종료 시 마무리 충격파)
@@ -882,6 +986,7 @@ export class Run {
     if (fever && !this.feverWasOn) audio.sfx('fever');
     this.feverWasOn = fever;
     this.effects.update(dt);
+    this.arrowRain.update(dt);
     this.lightField.update(dt);
     this.decals.update(dt);
     this.updateLowHp(dt);
@@ -1164,6 +1269,11 @@ export class Run {
       return;
     }
     if (en.boss[i] === 1) {
+      // 낙양 성주(화웅): 일반 보스 보상 경로 우회 → 공방전 점령으로 처리. (DESIGN 20)
+      if (this.boss.typeId === 'huaxiong') {
+        this.captureCastle(i);
+        return;
+      }
       // 보스 처치: 대형 폭발 + 보물상자 + 큰 보상 + BGM 복귀 + 도감 기록
       this.particles.burst(x, z, 2.6, 1.6, 0.7, 60, 8);
       this.effects.spawnRing(x, z, 16, 2.4, 1.6, 0.8, 0.7);
@@ -1232,6 +1342,30 @@ export class Run {
     en.kill(i);
   }
 
+  // 낙양 성주 처단: 처단 연출 + 점령 전환(보상은 siege.onCapture). 일반 보스 討伐/보물/도감 경로 우회.
+  private captureCastle(i: number): void {
+    const en = this.enemies;
+    const x = en.x[i];
+    const z = en.z[i];
+    this.particles.burst(x, z, 2.6, 1.6, 0.7, 60, 8);
+    this.effects.spawnRing(x, z, 16, 2.4, 1.6, 0.8, 0.7);
+    this.effects.spawnRing(x, z, 10, 2.2, 1.2, 2.0, 0.5);
+    this.effects.spawnFlash(x, z, 2.6, 2.0, 1.0, 7);
+    this.hitstop(120, 0.05);
+    this.rig.addTrauma(0.9);
+    this.cinematics.onBossDeath(x - this.player.x, z - this.player.z);
+    this.postfx?.pulseBlur(0.7);
+    this.postfx?.pulseAberration(1.0);
+    this.flashScreen(0.4);
+    const dl = lordDeathLine();
+    if (dl) this.hud.quote(lordName(), dl, 3200);
+    audio.sfx('levelup');
+    audio.playBgm('battle');
+    this.kills++;
+    this.siege.captureNow(x, z);
+    en.kill(i);
+  }
+
   private onGateBreached(gate: GateBarrier): void {
     this.world.update();
     this.gateBreachFx.burst(gate.x, gate.z);
@@ -1242,8 +1376,14 @@ export class Run {
     this.rig.addTrauma(0.78);
     this.rig.punchFov(3);
     this.flashScreen(0.16);
-    this.hud.banner(`${t('bannerHulaoBreak')} 虎牢關破城`, '#ffb05a', 58, 1900);
     audio.sfx('explosion');
+    // 낙양 외성문 파성: 공방전 통지 + 전용 배너(호로관 배너·게이트러시 우회). (DESIGN 20)
+    if (gate.key.startsWith('castle-')) {
+      this.siege.notifyGateBreach(gate.key);
+      this.hud.banner(`${getLang() === 'en' ? 'Gate Breached' : '성문 돌파'} 城門突破`, '#ffb05a', 52, 1600, 1);
+      return;
+    }
+    this.hud.banner(`${t('bannerHulaoBreak')} 虎牢關破城`, '#ffb05a', 58, 1900);
     this.gateRushTimer = 0.8;
     this.gateRushX = gate.x;
     this.gateRushZ = gate.z;
@@ -1725,6 +1865,23 @@ export class Run {
   testTriggerHulao(): void {
     this.map.triggerHulao(this.player.x, this.player.z);
   }
+  // 낙양 공방전 GFX 검증용 훅: 깃발 소유 전환 웨이브 / 불화살 볼리 강제.
+  testFlipBanners(allied: boolean): void {
+    castleRenderData.allied = allied;
+    castleRenderData.flipX = CASTLE.cx;
+    castleRenderData.flipZ = CASTLE.cz;
+    castleRenderData.flipVersion++;
+  }
+  testVolley(): void {
+    const px = this.player.x;
+    const pz = this.player.z;
+    const shots: { x: number; z: number; t: number }[] = [];
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      shots.push({ x: px + Math.cos(a) * 5, z: pz + Math.sin(a) * 5, t: 0.9 });
+    }
+    this.arrowRain.volley(shots);
+  }
   testPrimeGate(): void {
     if (!this.map.hulaoOn) this.map.triggerHulao(this.player.x, this.player.z);
     this.map.primeGate();
@@ -1737,6 +1894,17 @@ export class Run {
     const breached = this.map.recordKillAt(gate.x, gate.z);
     if (breached) this.onGateBreached(breached);
   }
+  // 낙양 공방전(DESIGN 20) QA
+  testSiegeBreach(key = 'castle-s'): void {
+    const g = this.map.gates.find((c) => c.key === key);
+    if (!g) return;
+    const breached = this.map.breachNear(g.x, g.z, 0.5);
+    if (breached) this.onGateBreached(breached);
+  }
+  testSiegeForceLord(): void { this.siege.testForceLord(); }
+  testSiegeForceCounter(): void { this.siege.testForceCounter(); }
+  testSiegeAddFall(n: number): void { this.siege.testAddFall(n); }
+  testSiegeForceDefend(): void { this.siege.testForceDefend(); }
   // 다음 레벨업 카드에 저주 유물 강제 + 즉시 레벨업
   testForceRelic(): void {
     this.forceRelicNext = true;
@@ -1804,6 +1972,12 @@ export class Run {
       relics: [...this.relicIds],
       endless: this.endless,
       fever: this.combo.fever,
+      siege: {
+        state: this.siege.siegeState,
+        fallGauge: this.siege.fallGaugeValue,
+        allied: castleRenderData.allied,
+        events: { ...this.siegeEvents },
+      },
       state: this.state,
     };
   }
