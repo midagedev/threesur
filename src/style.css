@@ -910,6 +910,27 @@ canvas {
   letter-spacing: 1px;
 }
 
+/* ===== 공성 목표 패널 (#50) ===== */
+/* hud-top 플로우 자식이라 위치·모바일 축소는 상속. 여기선 카운트다운 위험 점멸만 관리. */
+.hud-objective {
+  transform-origin: top center;
+}
+/* 카운트다운 ≤10s: 붉게 1Hz(주기 1s) 점멸 — 절제된 위험 신호.
+   색은 setObjective가 인라인으로 토글(인라인이 클래스보다 우선하므로). 여기선 점멸·그림자만. */
+.hud-objective .obj-danger {
+  text-shadow: 0 0 8px rgba(255, 90, 74, 0.6);
+  animation: obj-countdown-pulse 1s ease-in-out infinite;
+}
+@keyframes obj-countdown-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
 /* ===== HUD 반응형 (작은 화면 축소) ===== */
 @media (max-width: 560px) {
   .hud-top {

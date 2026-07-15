@@ -303,6 +303,8 @@ loadAtlas()
       siegeForceCounter: () => run.testSiegeForceCounter(),
       siegeAddFall: (n: number) => run.testSiegeAddFall(n),
       siegeForceDefend: () => run.testSiegeForceDefend(),
+      setObjective: (o: unknown) => run.testSetObjective(o),
+      damageGate: (key: string, amt: number) => run.testDamageGate(key, amt),
       resumeEndless: () => run.resumeEndless(),
       forceRelic: () => run.testForceRelic(),
       enterEndless: () => run.testEnterEndless(),

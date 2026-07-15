@@ -71,6 +71,7 @@ import type { GateBarrier, MapLandmark } from './battlefieldMap';
 import { SiegeSystem } from './siege';
 import { lordName, lordAppearLine, lordDeathLine, siegeQuestLine, siegeBanner } from '../data/siegeData';
 import { factionNarration, hulaoNarration, minibossHail } from '../data/narration';
+import { LandmarkSystem, WATCHTOWER_RANGE_MUL, BEACON_ATTACK_MUL } from './landmarks';
 
 type State = 'attract' | 'play' | 'levelup' | 'paused' | 'dead' | 'victory';
 
@@ -173,6 +174,7 @@ export class Run {
   private readonly events: BattlefieldEvents;
   private readonly objects: BattlefieldObjects;
   private readonly siege: SiegeSystem;
+  private readonly landmarks: LandmarkSystem;
   private siegeEvents = { lordSpawn: 0, capture: 0, counter: 0, volley: 0, defended: 0, lost: 0 };
 
   private readonly hud: Hud;
@@ -479,6 +481,9 @@ export class Run {
       if (!this.boss.active) audio.playBgm('battle');
     };
 
+    // 랜드마크 기능 시스템(#50 21.3): 망루 사거리 오라 + 봉화 랠리. run이 매 프레임 update·질의.
+    this.landmarks = new LandmarkSystem(this.map);
+
     // 낙뢰 화면 미세 플래시 훅
     this.effects.screenFlash = (i: number) => this.flashScreen(i);
     this.effects.spawnLight = (x, z, r, g, b, radius, life) =>
@@ -624,6 +629,7 @@ export class Run {
     this.objects.reset();
     this.map.reset();
     this.siege.reset();
+    this.landmarks.reset();
     this.siegeEvents = { lordSpawn: 0, capture: 0, counter: 0, volley: 0, defended: 0, lost: 0 };
     this.gateBreachFx.reset();
     this.cinematics.reset();
@@ -844,6 +850,25 @@ export class Run {
     this.spawner.setBossActive(this.boss.active);
     this.spawner.update(edt, this.gameTime, this.player.x, this.player.z);
     this.siege.update(edt, this.gameTime, this.player.x, this.player.z);
+    this.landmarks.update(edt);
+    // 봉화 점화(근접 자동, #50 21.3): 점화 순간 주변 적 스태거 + 넉백 펄스.
+    const ign = this.landmarks.tryIgniteBeacon(this.player.x, this.player.z);
+    if (ign) {
+      const cnt = this.hash.query(ign.x, ign.z, ign.radius, this.scratch);
+      for (let c = 0; c < cnt; c++) {
+        const j = this.scratch[c];
+        if (this.enemies.alive[j] === 1 && this.enemies.controlled[j] === 0) {
+          this.enemies.stun[j] = Math.max(this.enemies.stun[j], 0.9);
+          const ex = this.enemies.x[j] - ign.x;
+          const ez = this.enemies.z[j] - ign.z;
+          const d = Math.hypot(ex, ez) || 1;
+          this.enemies.push(j, ex / d, ez / d, 6);
+        }
+      }
+      this.effects.spawnRing(ign.x, ign.z, ign.radius, 2.2, 1.1, 0.4, 0.5);
+      this.hud.banner(getLang() === 'en' ? 'Beacon Rally 烽火' : '봉화 랠리 烽火', '#ff9a3c', 46, 1400, 1);
+      audio.sfx('warn');
+    }
 
     // 분리용 해시 (이동 전)
     this.hash.clear();
@@ -914,7 +939,19 @@ export class Run {
     }
 
     // 무기
+    // 랜드마크 버프(#50 21.3): 망루 근접 사거리 +25% / 봉화 랠리 공격 +20%.
+    // player.stats는 매프레임 재계산이 아니므로 snapshot→적용→복원(매프레임 곱셈 누적 방지).
+    const savedRangeMul = this.player.stats.rangeMul;
+    const savedDamageMul = this.player.stats.damageMul;
+    if (this.landmarks.watchtowerActive(this.player.x, this.player.z)) {
+      this.player.stats.rangeMul = savedRangeMul * WATCHTOWER_RANGE_MUL;
+    }
+    if (this.landmarks.beaconBuffActive()) {
+      this.player.stats.damageMul = savedDamageMul * BEACON_ATTACK_MUL;
+    }
     for (let i = 0; i < this.weapons.length; i++) this.weapons[i].update(this.ctx);
+    this.player.stats.rangeMul = savedRangeMul;
+    this.player.stats.damageMul = savedDamageMul;
     this.projectiles.update(
       gdt, this.player.x, this.player.z, this.enemies, this.hash,
       this.damageText, this.ctx.onKill, this.particles, this.effects, this.scratch,
@@ -948,6 +985,16 @@ export class Run {
       }
     }
     this.objects.hitAt(this.player.x, this.player.z, 4.0);
+    // 성문 HP 직접 타격(#50 21.2): 봉쇄 성문 근처(6m)면 초당 딜을 게이트에 흘려보내 깎는다.
+    // 파성된 개구부·점령 후는 nearestSealedGateKey가 null → 무영향(선택형).
+    const sealedGate = this.map.nearestSealedGateKey(this.player.x, this.player.z, 6);
+    if (sealedGate) {
+      const dealt = 120 * this.player.stats.damageMul * gdt; // GATE_STREAM_DPS 근사
+      const breached = this.map.damageGate(sealedGate, dealt);
+      const g = this.map.gates.find((x) => x.key === sealedGate);
+      if (g && Math.random() < 22 * gdt) this.effects.spawnRing(g.x, g.z, 1.4, 1.5, 0.55, 0.2, 0.2); // 성문 피격 스파크
+      if (breached) this.onGateBreached(breached);
+    }
 
     // 무쌍 난무 (실제 dt로 진행, 종료 시 마무리 충격파)
     this.ctx.dt = dt;
@@ -1042,6 +1089,7 @@ export class Run {
     this.renderSprites();
     this.updateLabels();
     this.updateMarkers(dt);
+    this.updateSiegeObjective();
 
     // 레벨업 대기
     if (this.pendingLevels > 0 && this.state === 'play') this.showNextLevelUp();
@@ -1191,10 +1239,79 @@ export class Run {
       if (lm.glow > 0) this.markers.glowAt(lm.x, lm.z, lm.glow, lm.gr, lm.gg, lm.gb);
       if (dsq < 30 * 30) this.markers.name(lm.name, lm.x, lm.height * 0.5 + 1.0, lm.z);
       if (dsq < 46 * 46) this.emitLandmarkAmbient(lm, dt);
+      // 랜드마크 상호작용 어포던스 링(#50 21.3): 봉화(점화 가능=활성), 군영·전고(상시 기능).
+      if (lm.kind === 11) {
+        this.markers.interactRing(lm.x, lm.z, 1.6, 0.9, 0.35, this.landmarks.beaconStateNear(lm.x, lm.z) === 0);
+      } else if (lm.kind === 5) {
+        this.markers.interactRing(lm.x, lm.z, 0.5, 1.3, 0.7, true); // 군영 회복(청록)
+      } else if (lm.kind === 6) {
+        this.markers.interactRing(lm.x, lm.z, 1.4, 0.85, 0.4, true); // 전고 스턴(주황)
+      } else if (lm.kind === 2) {
+        this.markers.interactRing(lm.x, lm.z, 0.6, 0.85, 1.2, this.landmarks.watchtowerActive(lm.x, lm.z)); // 망루 사거리(청)
+      }
     }
-    // 전장 오브젝트(화약통/만두/사당/목책)
+    // 전장 오브젝트(화약통/만두/사당/동라/목책) — 위치·어포던스 링 포함(#50 오너 Q: 위치 표기)
     this.objects.emitMarkers(this.markers, px, pz);
+    // 성문 HP 바(#50 21.2): 봉쇄 외성 3문 위에 게이지. 파성/HP없음이면 -1 → 미표시.
+    for (const g of CASTLE.outerGates) {
+      this.markers.gateBar(g.x, g.z, this.map.gateHp01(g.key));
+    }
+    // 현재 목표 방향 셰브론(#50 21.1): 목표 지점이 화면 밖이면 가장자리 지시.
+    const guide = this.siegeGuideTarget();
+    if (guide) this.markers.guide(guide.x, guide.z, px, pz, this.rig.camera);
+    else this.markers.guideOff();
     this.markers.end();
+  }
+
+  // 현재 공성 국면의 목표 지점(셰브론이 가리킬 곳). 성 근처가 아니면 null(선택형).
+  private siegeGuideTarget(): { x: number; z: number } | null {
+    const s = this.siege.siegeState;
+    if (s === 'held' || s === 'fallen') return null;
+    const near = Math.hypot(this.player.x - CASTLE.cx, this.player.z - CASTLE.cz) < 70;
+    if (s === 'enemy_held' || s === 'breached') {
+      if (!near) return null;
+      // 아직 안 부순 외성문 중 가장 가까운 곳
+      let best: { x: number; z: number } | null = null;
+      let bestD = Infinity;
+      for (const g of CASTLE.outerGates) {
+        if (this.map.isGateBreached(g.key)) continue;
+        const d = (g.x - this.player.x) ** 2 + (g.z - this.player.z) ** 2;
+        if (d < bestD) { bestD = d; best = { x: g.x, z: g.z }; }
+      }
+      return best;
+    }
+    if (s === 'lord' || s === 'captured' || s === 'counterattack') {
+      return near ? { x: CASTLE.cx, z: CASTLE.cz } : null;
+    }
+    return null;
+  }
+
+  // 국면별 목표 HUD 패널(#50 21.1). 성 근처가 아니거나 종결 상태면 숨김(선택형).
+  private updateSiegeObjective(): void {
+    const s = this.siege.siegeState;
+    const near = Math.hypot(this.player.x - CASTLE.cx, this.player.z - CASTLE.cz) < 60;
+    const en = getLang() === 'en';
+    if (!near || s === 'held' || s === 'fallen') { this.hud.setObjective(null); return; }
+    if (s === 'enemy_held' || s === 'breached') {
+      const done = this.map.castleOuterBreachCount();
+      this.hud.setObjective({
+        title: en ? 'Breach the Luoyang gates' : '낙양 성문을 부숴라',
+        sub: en ? `Attack the gate · breached ${done}/3 · reward 名器` : `성문을 공격하라 · 파성 ${done}/3 · 보상 名器`,
+        progress01: done / 3,
+      });
+    } else if (s === 'lord') {
+      this.hud.setObjective({ title: en ? 'Slay the warlord Hua Xiong' : '성주 화웅을 베어라', color: '#e85c4a' });
+    } else if (s === 'captured') {
+      this.hud.setObjective({ title: en ? 'Hold the keep' : '본성을 거점화하라', color: '#9affc0' });
+    } else if (s === 'counterattack') {
+      const rem = this.siege.counterRemainSec;
+      this.hud.setObjective({
+        title: en ? 'Repel the reclaimers' : '탈환군을 물리쳐라',
+        sub: en ? `Fall gauge ${this.siege.fallGaugeValue}/12` : `함락 게이지 ${this.siege.fallGaugeValue}/12`,
+        countdownSec: rem >= 0 ? rem : undefined,
+        color: '#e85c4a',
+      });
+    }
   }
 
   // 봉화대 불티 / 군영·잔해 연기 (근거리에서만, 순수 연출 — Math.random 게이트)
@@ -1931,6 +2048,8 @@ export class Run {
   testSiegeForceCounter(): void { this.siege.testForceCounter(); }
   testSiegeAddFall(n: number): void { this.siege.testAddFall(n); }
   testSiegeForceDefend(): void { this.siege.testForceDefend(); }
+  testSetObjective(o: unknown): void { this.hud.setObjective(o as never); }
+  testDamageGate(key: string, amt: number): void { const b = this.map.damageGate(key, amt); if (b) this.onGateBreached(b); }
   // 다음 레벨업 카드에 저주 유물 강제 + 즉시 레벨업
   testForceRelic(): void {
     this.forceRelicNext = true;
@@ -1964,6 +2083,7 @@ export class Run {
         collisions: this.map.collisionCount,
         gateKills: this.map.gateKills,
         gateBreached: this.map.isGateBreached(),
+        gateHp: { s: this.map.gateHp01('castle-s'), e: this.map.gateHp01('castle-e'), w: this.map.gateHp01('castle-w') },
         breaches: this.map.breachCount,
         playerInsideWall: this.map.circleBlocked(this.player.x, this.player.z, this.player.radius * 0.95),
         playerWallHits: this.playerWallHits,

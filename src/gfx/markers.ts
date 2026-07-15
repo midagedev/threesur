@@ -14,6 +14,7 @@ import {
   InstancedMesh,
   InstancedBufferAttribute,
   DynamicDrawUsage,
+  PerspectiveCamera,
 } from 'three';
 import { castleRenderData, CASTLE } from '../game/battlefieldMap';
 import type { CastleBanner } from '../game/battlefieldMap';
@@ -512,6 +513,216 @@ class BannerBatch {
   }
 }
 
+// 단색 텍스처 1장(작은 캔버스). 게이트 HP 바 배경/링 등 색만 필요한 스프라이트에 재사용.
+function solidTexture(r: number, g: number, b: number): CanvasTexture {
+  const cv = document.createElement('canvas');
+  cv.width = 4;
+  cv.height = 4;
+  const ctx = cv.getContext('2d')!;
+  ctx.fillStyle = `rgb(${r},${g},${b})`;
+  ctx.fillRect(0, 0, 4, 4);
+  const tex = new CanvasTexture(cv);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// 가로 그라디언트 텍스처(게이트 HP 채움: 금→주황). 값은 블룸 임계 근처에서 절제(광원처럼 타지 않게).
+function gateFillTexture(): CanvasTexture {
+  const cv = document.createElement('canvas');
+  cv.width = 64;
+  cv.height = 8;
+  const ctx = cv.getContext('2d')!;
+  const grad = ctx.createLinearGradient(0, 0, 64, 0);
+  grad.addColorStop(0, 'rgb(224,180,90)');
+  grad.addColorStop(1, 'rgb(200,96,36)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 8);
+  const tex = new CanvasTexture(cv);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const GATE_BAR_W = 3.0; // 바 전체 폭(월드)
+const GATE_BAR_H = 0.34; // 바 높이(월드)
+const GATE_BAR_Y = 3.2; // 성문 위 표시 높이
+
+// 성문 위 3D 빌보드 HP 바 풀(#50). 좌측 정렬 배경(어두운 적) + 좌측에서 자라는 채움(금→주황).
+// 스프라이트라 항상 카메라를 향한다. center.x=0 으로 좌측 앵커 고정 → hp01은 채움 scale.x만 바꾼다(캔버스 재드로 없음).
+class GateBarBatch {
+  private readonly bg: Sprite[] = [];
+  private readonly fill: Sprite[] = [];
+  private readonly cap: number;
+  private w = 0;
+
+  constructor(scene: Scene, cap: number) {
+    this.cap = cap;
+    const bgTex = solidTexture(58, 12, 10);
+    const fillTex = gateFillTexture();
+    for (let i = 0; i < cap; i++) {
+      const bgMat = new SpriteMaterial({ map: bgTex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, opacity: 0.9 });
+      const b = new Sprite(bgMat);
+      b.center.set(0, 0.5);
+      b.scale.set(GATE_BAR_W, GATE_BAR_H, 1);
+      b.renderOrder = 13;
+      b.visible = false;
+      scene.add(b);
+      this.bg.push(b);
+      const fillMat = new SpriteMaterial({ map: fillTex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
+      const f = new Sprite(fillMat);
+      f.center.set(0, 0.5);
+      f.scale.set(GATE_BAR_W, GATE_BAR_H, 1);
+      f.renderOrder = 14;
+      f.visible = false;
+      scene.add(f);
+      this.fill.push(f);
+    }
+  }
+
+  begin(): void {
+    this.w = 0;
+  }
+
+  // hp01 0..1. 음수면 미표시(파성됨/HP 없음).
+  push(x: number, z: number, hp01: number): void {
+    if (this.w >= this.cap || hp01 < 0) return;
+    const i = this.w++;
+    const lx = x - GATE_BAR_W * 0.5; // 좌측 앵커(성문 위 중앙 정렬)
+    const b = this.bg[i];
+    b.position.set(lx, GATE_BAR_Y, z);
+    b.visible = true;
+    const clamped = hp01 > 1 ? 1 : hp01;
+    const f = this.fill[i];
+    f.position.set(lx, GATE_BAR_Y, z);
+    f.scale.set(GATE_BAR_W * clamped, GATE_BAR_H, 1);
+    f.visible = clamped > 0.001;
+  }
+
+  end(): void {
+    for (let i = this.w; i < this.cap; i++) {
+      this.bg[i].visible = false;
+      this.fill[i].visible = false;
+    }
+  }
+
+  reset(): void {
+    for (let i = 0; i < this.cap; i++) {
+      this.bg[i].visible = false;
+      this.fill[i].visible = false;
+    }
+    this.w = 0;
+  }
+}
+
+// 랜드마크 상호작용 링 풀(#50). 지면 애디티브 고리. active면 채워진 맥동, 비활성이면 흐린 저채도 링.
+// 절제: 링 1겹, 알파 상한 낮게, 블룸 임계 아래.
+class RingBatch {
+  private readonly mat: ShaderMaterial;
+  private readonly matrices: Float32Array;
+  private readonly colors: Float32Array;
+  private readonly actives: Float32Array;
+  private readonly colAttr: InstancedBufferAttribute;
+  private readonly actAttr: InstancedBufferAttribute;
+  private readonly mesh: InstancedMesh;
+  private readonly cap: number;
+  private w = 0;
+
+  constructor(scene: Scene, cap: number) {
+    this.cap = cap;
+    const geo = new PlaneGeometry(1, 1);
+    geo.rotateX(-Math.PI / 2);
+    this.colors = new Float32Array(cap * 3);
+    this.actives = new Float32Array(cap);
+    this.colAttr = new InstancedBufferAttribute(this.colors, 3);
+    this.actAttr = new InstancedBufferAttribute(this.actives, 1);
+    this.colAttr.setUsage(DynamicDrawUsage);
+    this.actAttr.setUsage(DynamicDrawUsage);
+    geo.setAttribute('aColor', this.colAttr);
+    geo.setAttribute('aActive', this.actAttr);
+    this.mat = new ShaderMaterial({
+      uniforms: { uTime: { value: 0 } },
+      vertexShader: /* glsl */ `
+        attribute vec3 aColor;
+        attribute float aActive;
+        varying vec2 vUv;
+        varying vec3 vColor;
+        varying float vActive;
+        void main() {
+          vUv = uv;
+          vColor = aColor;
+          vActive = aActive;
+          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        varying vec2 vUv;
+        varying vec3 vColor;
+        varying float vActive;
+        void main() {
+          float r = length(vUv - 0.5) * 2.0;
+          // 고리 밴드: 안쪽 0.72 상승 ~ 바깥 0.98 하강.
+          float band = smoothstep(0.72, 0.84, r) * smoothstep(1.0, 0.9, r);
+          if (band <= 0.002 && vActive < 0.5) discard;
+          float pulse = 0.72 + 0.28 * sin(uTime * 3.0);
+          // active: 맥동하는 고리 + 아주 옅은 안쪽 채움. 비활성: 정적 흐린 고리만.
+          float ringA = band * (vActive > 0.5 ? 0.5 * pulse : 0.2);
+          float innerA = vActive > 0.5 ? smoothstep(0.86, 0.0, r) * 0.1 : 0.0;
+          float a = ringA + innerA;
+          if (a <= 0.003) discard;
+          gl_FragColor = vec4(vColor * a, a);
+        }
+      `,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      depthTest: true,
+    });
+    this.mesh = new InstancedMesh(geo, this.mat, cap);
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 2;
+    this.mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.matrices = this.mesh.instanceMatrix.array as Float32Array;
+    scene.add(this.mesh);
+  }
+
+  begin(): void {
+    this.w = 0;
+  }
+
+  push(x: number, z: number, radius: number, r: number, g: number, b: number, active: boolean): void {
+    if (this.w >= this.cap) return;
+    const i = this.w++;
+    const m = i * 16;
+    const d = radius * 2;
+    this.matrices[m] = d;
+    this.matrices[m + 5] = 1;
+    this.matrices[m + 10] = d;
+    this.matrices[m + 12] = x;
+    this.matrices[m + 13] = 0.05;
+    this.matrices[m + 14] = z;
+    this.matrices[m + 15] = 1;
+    const c = i * 3;
+    this.colors[c] = r;
+    this.colors[c + 1] = g;
+    this.colors[c + 2] = b;
+    this.actives[i] = active ? 1 : 0;
+  }
+
+  end(time: number): void {
+    this.mat.uniforms.uTime.value = time;
+    this.mesh.count = this.w;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.colAttr.needsUpdate = true;
+    this.actAttr.needsUpdate = true;
+  }
+
+  reset(): void {
+    this.w = 0;
+    this.mesh.count = 0;
+  }
+}
+
 // 지면 글로우 + 이름표 + 근접 힌트를 묶은 표식 레이어.
 export class MarkerLayer {
   private readonly glow: GlowBatch;
@@ -519,7 +730,15 @@ export class MarkerLayer {
   private readonly hints: TextSprites;
   private readonly titles: TextSprites;
   private readonly banners: BannerBatch;
+  private readonly gateBars: GateBarBatch;
+  private readonly rings: RingBatch;
   private time = 0;
+  // 방향 셰브론(#50): 화면 밖 목표를 화면 가장자리에서 가리키는 2D 오버레이. 에지 인디케이터는
+  // DOM이 가장 정확·경량(투영→NDC→가장자리 클램프). 목표 1개만, 반투명 금색, 깜빡임 없음.
+  private readonly guideEl: HTMLDivElement;
+  private readonly guideArrow: HTMLDivElement;
+  private readonly guideDist: HTMLDivElement;
+  private readonly gv = new Vector3(); // 투영 재사용(할당 0)
 
   constructor(scene: Scene, glowCap = 24, nameCap = 18, hintCap = 6) {
     this.glow = new GlowBatch(scene, glowCap);
@@ -527,6 +746,38 @@ export class MarkerLayer {
     this.hints = new TextSprites(scene, hintCap, HINT_STYLE, 12);
     this.titles = new TextSprites(scene, 2, TITLE_STYLE, 13);
     this.banners = new BannerBatch(scene);
+    this.gateBars = new GateBarBatch(scene, 4); // 외성 3문 + 여유 1
+    this.rings = new RingBatch(scene, 12);
+
+    this.guideEl = document.createElement('div');
+    this.guideEl.style.cssText = [
+      'position:fixed',
+      'left:0',
+      'top:0',
+      'display:none',
+      'flex-direction:column',
+      'align-items:center',
+      'gap:2px',
+      'pointer-events:none',
+      'z-index:19', // 상단 HUD(z20) 아래 — 목표 지시가 HUD를 가리지 않게
+      'font-family:"Nanum Myeongjo","Times New Roman",serif',
+      'will-change:transform,left,top',
+    ].join(';');
+    this.guideArrow = document.createElement('div');
+    this.guideArrow.style.cssText = [
+      'width:0',
+      'height:0',
+      'border-top:9px solid transparent',
+      'border-bottom:9px solid transparent',
+      'border-left:15px solid rgba(240,220,150,0.82)', // 우향 삼각형(0deg), guide()가 회전
+      'filter:drop-shadow(0 0 4px rgba(0,0,0,0.6))',
+    ].join(';');
+    this.guideDist = document.createElement('div');
+    this.guideDist.style.cssText =
+      'color:rgba(240,224,170,0.85);font-size:12px;letter-spacing:1px;text-shadow:0 1px 3px rgba(0,0,0,0.9);font-variant-numeric:tabular-nums;';
+    this.guideEl.appendChild(this.guideArrow);
+    this.guideEl.appendChild(this.guideDist);
+    document.body.appendChild(this.guideEl);
   }
 
   begin(time: number): void {
@@ -534,6 +785,8 @@ export class MarkerLayer {
     this.glow.begin();
     this.names.begin();
     this.hints.begin();
+    this.gateBars.begin();
+    this.rings.begin();
     // 성곽 깃발(정적) 애니 + 구역 이름표(페이드). run.ts 수정 없이 castleRenderData로 구동.
     this.banners.update(time);
     this.titles.begin();
@@ -555,11 +808,73 @@ export class MarkerLayer {
     this.hints.place(text, x, y, z, a);
   }
 
+  // 성문 위 3D HP 바(#50). begin~end 사이에 매 프레임 emit. hp01<0이면 미표시.
+  gateBar(x: number, z: number, hp01: number): void {
+    this.gateBars.push(x, z, hp01);
+  }
+
+  // 랜드마크 상호작용 링(#50). begin~end 사이에 매 프레임 emit. active면 맥동, 아니면 흐린 링.
+  interactRing(x: number, z: number, r: number, g: number, b: number, active: boolean): void {
+    this.rings.push(x, z, 1.6, r, g, b, active);
+  }
+
+  // 방향 셰브론(#50): 목표 지점이 화면 밖이면 가장자리에 방향+거리(m)를 표시, 화면 안이면 숨김.
+  // camera로 월드→NDC 투영. 거리는 player 위치 기준(run이 매 프레임 넘김). run 미배선 시 호출 안 되면 no-op.
+  guide(targetX: number, targetZ: number, playerX: number, playerZ: number, camera: PerspectiveCamera): void {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    this.gv.set(targetX, 2.2, targetZ);
+    this.gv.project(camera);
+    const behind = this.gv.z > 1;
+    const onScreen = !behind && this.gv.x >= -1 && this.gv.x <= 1 && this.gv.y >= -1 && this.gv.y <= 1;
+    if (onScreen) {
+      // 화면 안: 성문 글로우·이름표가 이미 위치를 표시하므로 셰브론은 숨김(절제).
+      if (this.guideEl.style.display !== 'none') this.guideEl.style.display = 'none';
+      return;
+    }
+    let nx = this.gv.x;
+    let ny = this.gv.y;
+    if (behind) {
+      nx = -nx;
+      ny = -ny;
+    }
+    // 화면 중심에서의 방향(NDC y는 위가 +1 → 스크린 y는 반전).
+    let dx = nx;
+    let dy = -ny;
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len;
+    dy /= len;
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const margin = 46;
+    const halfW = Math.max(10, cx - margin);
+    const halfH = Math.max(10, cy - margin);
+    const sX = Math.abs(dx) < 1e-3 ? Infinity : halfW / Math.abs(dx);
+    const sY = Math.abs(dy) < 1e-3 ? Infinity : halfH / Math.abs(dy);
+    const s = Math.min(sX, sY);
+    const ex = cx + dx * s;
+    const ey = cy + dy * s;
+    const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+    const dist = Math.round(Math.hypot(targetX - playerX, targetZ - playerZ));
+    this.guideEl.style.display = 'flex';
+    this.guideEl.style.left = `${ex}px`;
+    this.guideEl.style.top = `${ey}px`;
+    this.guideEl.style.transform = 'translate(-50%,-50%)';
+    this.guideArrow.style.transform = `rotate(${angleDeg}deg)`;
+    this.guideDist.textContent = `${dist}m`;
+  }
+
+  guideOff(): void {
+    if (this.guideEl.style.display !== 'none') this.guideEl.style.display = 'none';
+  }
+
   end(): void {
     this.glow.end(this.time);
     this.names.end();
     this.hints.end();
     this.titles.end();
+    this.gateBars.end();
+    this.rings.end(this.time);
   }
 
   reset(): void {
@@ -567,6 +882,9 @@ export class MarkerLayer {
     this.names.reset();
     this.hints.reset();
     this.titles.reset();
+    this.gateBars.reset();
+    this.rings.reset();
+    this.guideOff();
     // 깃발 지오메트리는 정적 성곽이라 유지하되, 점령으로 물든 색은 런마다 원색으로 재동기화.
     this.banners.resetOwnership();
   }

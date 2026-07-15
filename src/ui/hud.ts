@@ -30,6 +30,15 @@ export interface SlotView {
   accent: string;
 }
 
+// 공성 목표 HUD 패널(#50). 텍스트는 run이 ko/en 완성해 넘긴다(i18n 무접촉 계약).
+export interface Objective {
+  title: string; // 굵은 지시문 ("낙양 성문을 부숴라")
+  sub?: string; // 보조(보상 예고 등)
+  progress01?: number; // 0..1 이면 진행 바 표시(성문 HP 등). undefined/음수면 바 없음.
+  countdownSec?: number; // 지정 시 MM:SS 카운트다운(run이 매 프레임 값 갱신). undefined면 없음.
+  color?: string; // 진행 바 상황색(CSS 색). 기본 금색.
+}
+
 // 전투 HUD: 타이머/킬/레벨/골드/XP/HP + 무쌍 게이지 + 콤보 + 보스 HP 바 + 슬롯 바 + 배너.
 export class Hud {
   private readonly root: HTMLDivElement;
@@ -55,6 +64,15 @@ export class Hud {
   private bannerPlaying = false;
   private readonly quoteLayer: HTMLDivElement; // 전투 중 원군 대사 — 상단(조이스틱 존 회피, #31)
   private bossActiveNow = false; // 대사 박스 상단 오프셋을 보스바 유무에 맞춰 조정
+  // 공성 목표 패널(#50): 타이머 클러스터 하단(hud-top 플로우 마지막), 대사 박스 위.
+  private readonly objWrap: HTMLDivElement;
+  private readonly objTitle: HTMLDivElement;
+  private readonly objSub: HTMLDivElement;
+  private readonly objBarTrack: HTMLDivElement;
+  private readonly objBarFill: HTMLDivElement;
+  private readonly objCountdown: HTMLDivElement;
+  private objVisible = false;
+  private objDanger = false; // 카운트다운 ≤10s 붉은 점멸 상태
   private readonly feverEl: HTMLDivElement;
   private feverOn = false;
   private readonly slotBar: HTMLDivElement;
@@ -132,6 +150,50 @@ export class Hud {
     bossBar.appendChild(this.bossFill);
     this.bossWrap.appendChild(bossBar);
     top.appendChild(this.bossWrap);
+
+    // 공성 목표 패널(#50). hud-top 플로우의 마지막 자식 → 타이머/스탯/XP/보스바 아래에 자동 스택되고,
+    // 모바일 축소(.hud-top scale)도 함께 상속. 정보 전달용이라 pointer-events 없음.
+    this.objWrap = document.createElement('div');
+    this.objWrap.className = 'hud-objective';
+    this.objWrap.style.cssText = [
+      'display:none',
+      'flex-direction:column',
+      'align-items:center',
+      'gap:4px',
+      'max-width:min(92vw,440px)',
+      'box-sizing:border-box',
+      'margin-top:10px',
+      'padding:7px 18px',
+      'border:1px solid rgba(232,198,103,0.42)',
+      'border-radius:9px',
+      'background:linear-gradient(180deg,rgba(22,19,12,0.9),rgba(12,11,8,0.92))',
+      'box-shadow:0 3px 16px rgba(0,0,0,0.5),0 0 14px rgba(232,198,103,0.1)',
+    ].join(';');
+    const objHead = document.createElement('div');
+    objHead.style.cssText =
+      'display:flex;gap:12px;align-items:baseline;justify-content:center;flex-wrap:wrap;max-width:100%;';
+    this.objTitle = document.createElement('div');
+    this.objTitle.style.cssText =
+      'color:#f4e6bd;font-size:17px;letter-spacing:2px;text-align:center;line-height:1.25;text-shadow:0 1px 6px rgba(0,0,0,0.8);';
+    this.objCountdown = document.createElement('div');
+    this.objCountdown.style.cssText =
+      'display:none;color:#e8c667;font-size:15px;letter-spacing:1px;font-variant-numeric:tabular-nums;';
+    objHead.appendChild(this.objTitle);
+    objHead.appendChild(this.objCountdown);
+    this.objSub = document.createElement('div');
+    this.objSub.style.cssText =
+      'display:none;color:#b9b18c;font-size:12px;letter-spacing:1px;text-align:center;line-height:1.3;';
+    this.objBarTrack = document.createElement('div');
+    this.objBarTrack.style.cssText =
+      'display:none;width:100%;height:5px;border-radius:3px;background:rgba(20,18,12,0.9);border:1px solid rgba(232,198,103,0.28);overflow:hidden;';
+    this.objBarFill = document.createElement('div');
+    this.objBarFill.style.cssText =
+      'height:100%;width:0%;background:linear-gradient(90deg,#a8791f,#e8c667);box-shadow:0 0 6px rgba(232,198,103,0.4);transition:width 0.18s;';
+    this.objBarTrack.appendChild(this.objBarFill);
+    this.objWrap.appendChild(objHead);
+    this.objWrap.appendChild(this.objSub);
+    this.objWrap.appendChild(this.objBarTrack);
+    top.appendChild(this.objWrap);
 
     document.body.appendChild(top);
     this.root = top;
@@ -308,6 +370,98 @@ export class Hud {
       this.bannerPlaying = false;
       this.bannerLayer.textContent = '';
       this.setFever(false);
+      // 목표 패널 정리(#50).
+      this.objVisible = false;
+      this.objDanger = false;
+      this.objCountdown.classList.remove('obj-danger');
+      this.objCountdown.style.color = '#e8c667';
+      this.objWrap.getAnimations().forEach((a) => a.cancel());
+      this.objWrap.style.display = 'none';
+      this.reflowQuote();
+    }
+  }
+
+  // 공성 목표 패널 갱신(#50). null이면 페이드 아웃하며 숨김. run이 텍스트/진행/카운트다운을 완성해 넘긴다.
+  // 등장 시 대사 박스를 패널 실제 하단 아래로 밀어 겹침을 막는다(보스바·모바일 축소 반영).
+  setObjective(o: Objective | null): void {
+    if (!o) {
+      if (!this.objVisible) return;
+      this.objVisible = false;
+      if (this.objDanger) {
+        this.objDanger = false;
+        this.objCountdown.classList.remove('obj-danger');
+        this.objCountdown.style.color = '#e8c667';
+      }
+      const el = this.objWrap;
+      const anim = el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, easing: 'ease-out' });
+      anim.onfinish = () => {
+        if (!this.objVisible) el.style.display = 'none';
+      };
+      this.reflowQuote();
+      return;
+    }
+    this.objTitle.textContent = o.title;
+    if (o.sub) {
+      this.objSub.textContent = o.sub;
+      this.objSub.style.display = '';
+    } else {
+      this.objSub.style.display = 'none';
+    }
+    // 진행 바 (성문 HP 등). 상황색 지정 시 그 색, 아니면 기본 금색 그라디언트.
+    if (o.progress01 !== undefined && o.progress01 >= 0) {
+      this.objBarTrack.style.display = '';
+      this.objBarFill.style.width = `${Math.max(0, Math.min(1, o.progress01)) * 100}%`;
+      this.objBarFill.style.background = o.color
+        ? `linear-gradient(90deg,${o.color},${o.color})`
+        : 'linear-gradient(90deg,#a8791f,#e8c667)';
+    } else {
+      this.objBarTrack.style.display = 'none';
+    }
+    // 카운트다운 (run이 매 프레임 값 갱신 — 여기선 표시만). ≤10s면 붉게 1Hz 점멸(절제).
+    if (o.countdownSec !== undefined && o.countdownSec >= 0) {
+      const total = Math.ceil(o.countdownSec);
+      const mm = Math.floor(total / 60);
+      const ss = total % 60;
+      this.objCountdown.textContent = `${mm}:${ss.toString().padStart(2, '0')}`;
+      this.objCountdown.style.display = '';
+      const danger = o.countdownSec <= 10;
+      if (danger !== this.objDanger) {
+        this.objDanger = danger;
+        this.objCountdown.classList.toggle('obj-danger', danger);
+        this.objCountdown.style.color = danger ? '#ff6a58' : '#e8c667'; // 인라인이 클래스보다 우선
+      }
+    } else {
+      this.objCountdown.style.display = 'none';
+      if (this.objDanger) {
+        this.objDanger = false;
+        this.objCountdown.classList.remove('obj-danger');
+        this.objCountdown.style.color = '#e8c667';
+      }
+    }
+    const wasVisible = this.objVisible;
+    this.objVisible = true;
+    this.objWrap.style.display = 'flex';
+    // 등장 트랜스폼 전에 측정해야 실제 높이가 잡힘(WAAPI translateY는 레이아웃에 영향 없음).
+    this.reflowQuote();
+    if (!wasVisible) {
+      this.objWrap.animate(
+        [
+          { opacity: 0, transform: 'translateY(-6px)' },
+          { opacity: 1, transform: 'translateY(0)' },
+        ],
+        { duration: 200, easing: 'ease-out' },
+      );
+    }
+  }
+
+  // 대사 박스(quoteLayer) 상단 오프셋 재계산. 목표 패널이 보이면 그 실제 하단 아래로,
+  // 아니면 보스바 유무 기준의 기존 오프셋으로. getBoundingClientRect가 모바일 축소·보스바를 모두 반영.
+  private reflowQuote(): void {
+    if (this.objVisible) {
+      const bottom = this.objWrap.getBoundingClientRect().bottom;
+      this.quoteLayer.style.top = `${Math.round(bottom + 8)}px`;
+    } else {
+      this.quoteLayer.style.top = `calc(env(safe-area-inset-top,0px) + ${this.bossActiveNow ? 164 : 96}px)`;
     }
   }
 
@@ -447,10 +601,10 @@ export class Hud {
     } else {
       this.bossWrap.style.display = 'none';
     }
-    // 보스바가 뜨면 상단 대사 박스를 그만큼 아래로 (겹침 방지, #31).
+    // 보스바가 뜨면 상단 대사 박스를 그만큼 아래로 (겹침 방지, #31). 목표 패널이 있으면 그 하단 기준(#50).
     if (s.bossActive !== this.bossActiveNow) {
       this.bossActiveNow = s.bossActive;
-      this.quoteLayer.style.top = `calc(env(safe-area-inset-top,0px) + ${s.bossActive ? 164 : 96}px)`;
+      this.reflowQuote();
     }
   }
 

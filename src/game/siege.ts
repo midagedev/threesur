@@ -433,6 +433,10 @@ export class SiegeSystem {
   get lordActive(): boolean {
     return this.state === 'lord';
   }
+  // 수성 잔여 시간(초). 수성 중이 아니면 -1. 목표 HUD 카운트다운용(#50 21.1).
+  get counterRemainSec(): number {
+    return this.state === 'counterattack' ? Math.max(0, COUNTER_DURATION - this.counterTimer) : -1;
+  }
 
   // === QA 훅(run 테스트 메서드가 호출 — 조건 무시 강제 진행) ===
   testForceLord(): void {

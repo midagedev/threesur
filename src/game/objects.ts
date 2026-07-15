@@ -192,6 +192,10 @@ export class BattlefieldObjects {
       const g = OBJ_GLOW[k];
       if (g) layer.glowAt(x, z, g[3], g[0], g[1], g[2]);
       layer.name(objName(k), x, OBJ_LABEL_Y[k], z);
+      // 상호작용 어포던스 링 — 사당/동라/전고가 "쓸 수 있는 것"으로 읽히고 위치가 드러나게(#50 오너 Q).
+      if (k === KIND_SHRINE) layer.interactRing(x, z, 1.5, 1.05, 0.4, true); // 금빛 버프
+      else if (k === KIND_GONG) layer.interactRing(x, z, 1.5, 1.2, 0.5, true); // 동라 자석
+      else if (k === KIND_DRUM) layer.interactRing(x, z, 1.4, 0.85, 0.4, this.drumCd[i] <= 0); // 전고: 쿨 중이면 흐리게
       const dx = px - x;
       const dz = pz - z;
       if (dx * dx + dz * dz <= hintSq) layer.hint(objHint(k), x, OBJ_LABEL_Y[k] + 1.0, z);
