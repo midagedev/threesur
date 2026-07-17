@@ -5,6 +5,7 @@ import { Cinematics } from '../gfx/cinematics';
 import type { Input } from '../core/input';
 import { Ground } from '../gfx/ground';
 import { BattlefieldWorld } from '../gfx/worldKit';
+import { updateFortressCutaway } from '../gfx/fortressKit';
 import { GateBreachFx } from '../gfx/gateBreachFx';
 import { InstancedSpriteRenderer, ShadowRenderer } from '../gfx/sprites';
 import { EffectsSystem } from '../gfx/effects';
@@ -779,6 +780,7 @@ export class Run {
       this.particles.update(dt);
       this.effects.update(dt);
       this.rig.update(dt, tx, tz);
+      updateFortressCutaway(0, 0, 0, 0, 0, 0, false); // 메뉴 배경엔 컷어웨이 없음
       this.musouStrength += (0 - this.musouStrength) * Math.min(1, dt * 6);
       this.renderSprites();
       return;
@@ -1118,6 +1120,13 @@ export class Run {
     this.cinematics.update(dt); // 시네마틱 포즈를 rig에 밀어넣은 뒤 rig.update
     this.rig.update(dt, this.player.x, this.player.z);
     this.banner.update(dt, this.rig.camera); // rig 갱신 후 카메라 정면에 배너 배치
+    // #52 성벽/성문루 컷어웨이 — 성 구역(콜라이더 존)에서만. 카메라 확정 직후 갱신.
+    const cam = this.rig.camera.position;
+    updateFortressCutaway(
+      cam.x, cam.y, cam.z,
+      this.player.x, 1.2, this.player.z,
+      this.map.activeColliderCount > 0,
+    );
 
     if (this.gateRushTimer > 0) {
       this.gateRushTimer -= dt;

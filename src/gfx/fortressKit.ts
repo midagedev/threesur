@@ -25,6 +25,32 @@ import type { GateBarrier, MapWall } from '../game/battlefieldMap';
 const FOG_COLOR = new Vector3(0.00018, 0.00026, 0.0008);
 const FOG_DENSITY = 0.019;
 
+// #52 성벽/성문루 컷어웨이: 카메라와 플레이어를 잇는 얇은 광선 실린더 안의 성 구조물
+// 프래그먼트를 IGN 오더드 디더로 discard → 플레이어가 구조물 뒤/아래로 가도 비쳐 보인다.
+// foot-depth(플레이어 자신의 기운 머리)로는 못 잡는 '카메라측 오버헤드 가림'을 해소.
+// 모든 fortressMaterial이 같은 유니폼 객체를 공유 → 한 번 갱신하면 전부 반영.
+const cutUniforms = {
+  uCutFrom: { value: new Vector3(0, 40, 60) }, // 카메라 월드 위치
+  uCutTo: { value: new Vector3(0, 1.2, 0) }, // 플레이어 상반신(발+1.2) 목표
+  uCutR: { value: 2.0 }, // 실린더 반경(월드) — 빌보드 폭·높이 + 여유
+  uCutOn: { value: 0 }, // 성 근접 시에만 1
+};
+
+// 매프레임 호출(run.ts). 카메라 확정 이후여야 한다.
+export function updateFortressCutaway(
+  camX: number,
+  camY: number,
+  camZ: number,
+  px: number,
+  py: number,
+  pz: number,
+  on: boolean,
+): void {
+  cutUniforms.uCutFrom.value.set(camX, camY, camZ);
+  cutUniforms.uCutTo.value.set(px, py, pz);
+  cutUniforms.uCutOn.value = on ? 1 : 0;
+}
+
 interface FortressPalette {
   base: number;
   dark: number;
@@ -116,6 +142,10 @@ function fortressMaterial(palette: FortressPalette): ShaderMaterial {
       uTextureScale: { value: palette.textureScale },
       uFogColor: { value: FOG_COLOR.clone() },
       uFogDensity: { value: FOG_DENSITY },
+      uCutFrom: cutUniforms.uCutFrom, // 공유 참조 — updateFortressCutaway가 일괄 갱신
+      uCutTo: cutUniforms.uCutTo,
+      uCutR: cutUniforms.uCutR,
+      uCutOn: cutUniforms.uCutOn,
     },
     vertexShader: /* glsl */ `
       varying vec3 vWorld;
@@ -138,10 +168,31 @@ function fortressMaterial(palette: FortressPalette): ShaderMaterial {
       uniform float uTextureScale;
       uniform vec3 uFogColor;
       uniform float uFogDensity;
+      uniform vec3 uCutFrom;
+      uniform vec3 uCutTo;
+      uniform float uCutR;
+      uniform float uCutOn;
       varying vec3 vWorld;
       varying vec3 vNormalWorld;
       varying float vFogDepth;
       void main() {
+        // #52 컷어웨이: 카메라→플레이어 광선 실린더 안이고 플레이어보다 카메라 쪽에 있는
+        // 조각을 오더드 디더(IGN)로 제거 → 성문루/성벽 뒤 플레이어가 비쳐 보인다.
+        if (uCutOn > 0.5) {
+          vec3 axis = uCutTo - uCutFrom;
+          float pl = length(axis);
+          vec3 dir = axis / max(pl, 0.001);
+          vec3 rel = vWorld - uCutFrom;
+          float along = dot(rel, dir);
+          if (along > 0.4 && along < pl - 0.5) {
+            float perp = length(rel - dir * along);
+            float hole = 1.0 - smoothstep(uCutR * 0.6, uCutR, perp);
+            if (hole > 0.001) {
+              float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+              if (hole > ign) discard;
+            }
+          }
+        }
         vec3 n = normalize(vNormalWorld);
         vec2 surfaceUv = abs(n.y) > 0.72
           ? vWorld.xz
